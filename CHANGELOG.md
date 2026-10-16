@@ -1,5 +1,12 @@
 # 更新记录
 
+## 页面结构诊断与零媒体验证 — 2026-10-16
+
+- 新增固定纯图页面诊断：nav＋源页最多2请求，零媒体/重试/跳转，60秒Job；观察原始modules、重复JSON成员及Directory合并，类型/计数/位置脱敏记录。下载器放行条件未改。
+- 新增60项，保留原479项覆盖；本地538 PASS/1 SKIP，跳过仅Windows符号链接权限，FFmpeg合成测试实际执行；编译和依赖检查通过。源码0dc6551的[Windows CI](https://github.com/awa606/BiliBatchDownloader/actions/runs/38915088185)539 PASS/0 SKIP（24.99秒）。
+- 真实一次2请求0媒体：5个module_blocked均null，合并后仍null，当前结构诊断完成。新页SHA变化，旧失败原因保持未知。随后媒体地址元数据校验失败，4PNG基线未完成；未恢复图片/实况下载。
+- 预注册、原报告及停止/指纹核验收据保留本机。Research仍NEEDS MORE EVIDENCE，无新版EXE、Release或清理；下一步先定位媒体URL契约失败类别。
+
 ## 本地预览与图集探针加固 — 2026-10-16
 
 - 新增固定三资产离线预览探针：最多6张、实际PTS、比例缩放、重复PNG展示去重、60秒Job、取消/失败独立记录。真实生成18PNG，逐图与SHA核验通过，原文件保持不变。
