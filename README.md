@@ -66,6 +66,24 @@ New-Item -ItemType Directory -Path .artifacts -Force | Out-Null
 
 单页报告schema3保留`response_diagnostics`的原始字节层与`page_response_sha256`的原始完整响应语义，新增`content_decoding`及成功后的`decoded_response_diagnostics`。共享元数据层仅支持缺失/单identity和单gzip；原始与解码后各3MiB，拒绝未知/多重编码、损坏、截断、拼接成员及任何尾随数据。解码后执行原风险/API/身份检查；失败不保存部分解码内容，超原始上限只记限量前缀。媒体分支不解压，不执行脚本或放宽身份规则；验证相关词出现不能单独判定验证码。
 
+## 图文页面结构诊断工具
+
+`experiments/gallery_page_probe.py`只诊断固定纯图样本1249456774436618276，最多登录检查1次＋源页1次，零重试、零跳转、零媒体；worker60秒，网络等待15秒，间隔至少1秒，原始/解码后各3MiB。没有媒体放行选项，不依赖FFmpeg，不刷新浏览器或预取页面。
+
+它通过固定gallery-dl的实际入口观察原始modules，再观察合并后的Directory；另对同一初始化数据切片保留重复JSON字段的类型与位置，区分模块、其他字段、字符串和切片之外的标记。诊断完成、有效阻止模块、基线匹配各自报告；响应哈希改变时不追认历史失败原因。初始化数据外的标记不被擅自称为脚本模板。
+
+以下仅是已登记实验的调用格式；每个登记最多执行一次，不能反复运行直到成功：
+
+```powershell
+.\.venv\Scripts\python.exe experiments/gallery_page_probe.py `
+  --profile 'D:\sd.webui\tools\bili_download\chrome_bili_profile' `
+  --baseline-report .artifacts/U03-gallery-user-images-20261016-attempt1.json `
+  --prior-failure-report .artifacts/gallery-download-u03-images-20261016-attempt1/report.json `
+  --output .artifacts/U03-gallery-page-NEW-ATTEMPT.json
+```
+
+两份历史报告必须匹配固定样本与旧失败契约，并在父子进程间核对SHA。输出独占创建，不覆盖旧证据；超时请求数无法回收时写未知，不伪装为0。报告和日志不保留正文、阻止提示原文、Cookie或签名地址。诊断结果不会修改下载探针的停止规则。
+
 ## 本地预览研究工具
 
 `experiments/local_preview_probe.py`只处理已核验下载报告中的三个固定BV/CID文件，不联网或重新下载。每项最多6张PNG，长边不超过640像素、不放大；记录实际PTS和计划时间，完全相同PNG仅合并展示，保留所有采样。源视频和原下载报告保持不变；单项私有Windows Job限60秒，截图错误、取消与下载结果分开。
