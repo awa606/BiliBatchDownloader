@@ -1,0 +1,15 @@
+{
+  "status": "UPSTREAM_EXPECTATIONS_NOT_LIVE_VERIFIED",
+  "samples": [
+    {"kind": "video", "url": "https://www.bilibili.com/video/BV13x41117TL", "expected_uid": "65880958", "expected_duration_seconds": 554.117, "source": "yt-dlp/yt-dlp@897341241f2bfb2439fe0367f4c7c9ccd29a3828/yt_dlp/extractor/bilibili.py"},
+    {"kind": "multipart_video", "url": "https://www.bilibili.com/video/BV1bK411W797", "expected_parts": 23, "probe_parts": [1, 2], "source": "yt-dlp/yt-dlp@897341241f2bfb2439fe0367f4c7c9ccd29a3828/yt_dlp/extractor/bilibili.py"},
+    {"kind": "multiple_images", "url": "https://www.bilibili.com/opus/988425412565532689", "expected_images": 4, "expected_format": "png", "source": "mikf/gallery-dl@ef30ea97c68d0d03ec49bd810ffe3fb4965559b7/test/results/bilibili.py"},
+    {"kind": "live_photo", "url": "https://www.bilibili.com/opus/1154738799821979656", "expected_formats": ["jpg", "mp4"], "source": "mikf/gallery-dl@ef30ea97c68d0d03ec49bd810ffe3fb4965559b7/test/results/bilibili.py"},
+    {"kind": "dynamic_video", "url": "https://t.bilibili.com/998134289197432852", "expected_bvid": "BV1TAmBYVEJr", "source": "yt-dlp/yt-dlp@897341241f2bfb2439fe0367f4c7c9ccd29a3828/yt_dlp/extractor/bilibili.py"},
+    {"kind": "standalone_dynamic_short_video", "url": "https://t.bilibili.com/1259442066581094421", "expected_type_source": "user description, not live verified", "source": "user-provided-20261016"},
+    {"kind": "live_photo", "url": "https://www.bilibili.com/opus/1257912749013336118", "expected_type_source": "user description, not live verified", "source": "user-provided-20261016"},
+    {"kind": "multiple_images", "url": "https://www.bilibili.com/opus/1249456774436618276", "expected_type_source": "user description, count unknown", "source": "user-provided-20261016"}
+  ],
+  "missing_types": ["animated_gif", "repost", "text_only"],
+  "note": "Expected types are inputs, not results. Live Photo does not substitute for GIF. User-provided samples are additional cases; the upstream sample failure remains preserved."
+}

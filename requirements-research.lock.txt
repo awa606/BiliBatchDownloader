@@ -1,0 +1,13 @@
+certifi==2026.7.22
+charset-normalizer==3.5.2
+colorama==0.4.6
+gallery_dl==1.32.16
+idna==3.20
+iniconfig==2.3.1
+packaging==26.3
+pluggy==1.7.0
+Pygments==2.21.0
+pytest==8.4.2
+requests==2.34.2
+urllib3==2.8.0
+yt-dlp==2026.8.19

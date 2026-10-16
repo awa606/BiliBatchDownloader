@@ -1,0 +1,21 @@
+name: Research checks (offline only)
+on:
+  push:
+  pull_request:
+permissions:
+  contents: read
+jobs:
+  research-tests:
+    runs-on: windows-latest
+    timeout-minutes: 10
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: '3.13'
+      - name: Install research dependencies
+        run: python -m pip install -r requirements-research.lock.txt
+      - name: Compile research scripts
+        run: python -m compileall -q experiments
+      - name: Test synthetic contracts only
+        run: python -m pytest -q --basetemp=.artifacts/pytest-ci --junitxml=.artifacts/tests.xml
