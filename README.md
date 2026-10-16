@@ -22,6 +22,7 @@
 cd D:\sd.webui\bili_desktop
 py -3.13 -m venv .venv
 .\.venv\Scripts\python.exe -m pip install -r requirements-research.lock.txt
+New-Item -ItemType Directory -Path .artifacts -Force | Out-Null
 .\.venv\Scripts\python.exe -m pytest -q --basetemp=.artifacts/pytest-manual-01
 ```
 
