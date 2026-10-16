@@ -158,8 +158,9 @@ class BoundedTransport:
             raise ProbeStop("media_origin_not_allowed")
         self.media_urls = set(urls)
 
-    def request(self, request):
+    def request(self, request, *, default_headers=None):
         from yt_dlp.networking import Request, Response
+        from yt_dlp.utils.networking import HTTPHeaderDict
         if isinstance(request, str):
             request = Request(request)
         if not isinstance(request, Request) or request.method not in ("GET", "HEAD") or request.data is not None:
@@ -173,7 +174,7 @@ class BoundedTransport:
             raise ProbeStop("request_origin_or_endpoint_not_allowed")
         # Cookies are added afresh by CookieJar for their own domains. Never carry
         # a raw Cookie or Authorization header across a media redirect.
-        headers = {key: val for key, val in request.headers.items()
+        headers = {key: val for key, val in HTTPHeaderDict(default_headers, request.headers).items()
                    if key.lower() not in {"cookie", "authorization", "proxy-authorization", "accept-encoding"}}
         headers["Accept-Encoding"] = "identity"
         for hop in range(3):
@@ -352,7 +353,7 @@ def download_one(sample, jar, transport, workdir, ffmpeg, ffprobe):
             return result
     class ResearchYDL(YoutubeDL):
         def urlopen(self, request):
-            return transport.request(request)
+            return transport.request(request, default_headers=self.params["http_headers"])
     options = {"logger": video.StopLogger(), "quiet": True, "no_warnings": False, "noplaylist": True,
                "retries": 0, "fragment_retries": 0, "extractor_retries": 0, "file_access_retries": 0,
                "socket_timeout": 15, "cachedir": False, "writeinfojson": False, "writethumbnail": False,

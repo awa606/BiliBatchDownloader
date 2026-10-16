@@ -7,6 +7,7 @@ import io
 import json
 import os
 from pathlib import Path
+import socket
 import subprocess
 import sys
 import urllib.error
@@ -73,6 +74,104 @@ def transport_with(monkeypatch, responses, initial=0):
 
 def redirect(location):
     return urllib.error.HTTPError("https://synthetic.test", 302, "secret omitted", {"Location": location}, io.BytesIO())
+
+
+def capture_real_first_webpage(monkeypatch, tmp_path, *, defaults=None, per_request=None):
+    """Exercise download_one -> real BiliBiliIE -> ResearchYDL -> transport.
+
+    Stop at the urllib boundary, before any response, network, credential load,
+    media or subprocess. Only synthetic empty cookies enter download_one.
+    """
+    from yt_dlp import YoutubeDL
+    from yt_dlp.extractor.bilibili import BiliBiliIE
+    from yt_dlp.networking._urllib import UrllibRH
+
+    def forbidden(*args, **kwargs):
+        pytest.fail("Offline header regression attempted network, credentials or subprocess")
+
+    monkeypatch.setattr(socket.socket, "connect", forbidden)
+    monkeypatch.setattr(socket.socket, "connect_ex", forbidden)
+    monkeypatch.setattr(socket, "create_connection", forbidden)
+    monkeypatch.setattr(socket, "getaddrinfo", forbidden)
+    monkeypatch.setattr(probe.common, "load_bili_cookies", forbidden)
+    monkeypatch.setattr(probe.subprocess, "run", forbidden)
+    monkeypatch.setattr(probe.subprocess, "Popen", forbidden)
+    initialized = []
+    upstream_init = YoutubeDL.__init__
+
+    def initialize(downloader, *args, **kwargs):
+        upstream_init(downloader, *args, **kwargs)
+        # Inject after native initialization so synthetic Cookie is tested as a
+        # raw default header, rather than consumed by upstream cookie loading.
+        downloader.params["http_headers"].update(defaults or {})
+        initialized.append(dict(downloader.params["http_headers"]))
+
+    monkeypatch.setattr(YoutubeDL, "__init__", initialize)
+    if per_request is not None:
+        monkeypatch.setattr(BiliBiliIE, "geo_verification_headers", lambda self: per_request.copy())
+    jar = http.cookiejar.CookieJar()
+    transport = probe.BoundedTransport(jar)
+    calls = []
+
+    def capture(request, timeout):
+        assert timeout == 15
+        calls.append(request)
+        raise probe.ProbeStop("offline_first_request_captured")
+
+    monkeypatch.setattr(transport.opener, "open", capture)
+    with pytest.raises(probe.ProbeStop, match="offline_first_request_captured"):
+        probe.download_one(probe.SAMPLES[0], jar, transport, tmp_path, Path("ffmpeg.exe"), None)
+    assert len(initialized) == len(calls) == transport.count == 1
+    assert calls[0].full_url == PAGE and calls[0].method == "GET"
+    assert transport.redirect_count == 0 and not transport.media_urls
+    assert not list(tmp_path.iterdir())
+    # Compare against the pinned upstream request handler's actual merge rule.
+    with UrllibRH(logger=probe.video.StopLogger(), headers=initialized[0]) as handler:
+        expected = {key.lower(): value for key, value in handler._merge_headers(per_request or {}).items()}
+    return {key.lower(): value for key, value in calls[0].header_items()}, expected
+
+
+def test_real_first_webpage_preserves_initialized_upstream_default_headers(monkeypatch, tmp_path):
+    actual, expected = capture_real_first_webpage(monkeypatch, tmp_path)
+    for name in ("user-agent", "accept", "accept-language", "sec-fetch-mode"):
+        assert actual.get(name) == expected[name]
+    assert actual["accept-encoding"] == "identity"
+
+
+def test_real_first_webpage_request_overrides_defaults_case_insensitively(monkeypatch, tmp_path):
+    actual, expected = capture_real_first_webpage(monkeypatch, tmp_path,
+        defaults={"User-Agent": "SYNTHETIC_DEFAULT", "X-Probe": "default", "Range": "bytes=0-7",
+                  "Referer": "https://www.bilibili.com/"},
+        per_request={"uSeR-aGeNt": "SYNTHETIC_REQUEST", "x-pRoBe": "request", "rAnGe": "bytes=8-15"})
+    for name in ("user-agent", "x-probe", "range", "referer", "accept"):
+        assert actual.get(name) == expected[name]
+    assert actual["user-agent"] == "SYNTHETIC_REQUEST" and actual["range"] == "bytes=8-15"
+
+
+@pytest.mark.parametrize("header_layer", ["defaults", "per_request", "both"])
+def test_real_first_webpage_filters_sensitive_headers_after_merge(header_layer, monkeypatch, tmp_path):
+    sensitive = {"cOoKiE": "SYNTHETIC_PRIVATE", "aUtHoRiZaTiOn": "SYNTHETIC_PRIVATE",
+                 "pRoXy-AuThOrIzAtIoN": "SYNTHETIC_PRIVATE", "aCcEpT-EnCoDiNg": "gzip"}
+    actual, expected = capture_real_first_webpage(monkeypatch, tmp_path,
+        defaults=sensitive if header_layer in {"defaults", "both"} else {},
+        per_request={**(sensitive if header_layer in {"per_request", "both"} else {}),
+                     "Referer": "https://www.bilibili.com/", "Range": "bytes=8-15"})
+    assert not {"cookie", "authorization", "proxy-authorization"}.intersection(actual)
+    assert "SYNTHETIC_PRIVATE" not in actual.values()
+    assert actual["accept-encoding"] == "identity"
+    assert actual["referer"] == expected["referer"] and actual["range"] == expected["range"]
+
+
+def test_header_merge_does_not_mutate_inputs_or_emit_case_duplicates(monkeypatch):
+    defaults = {"User-Agent": "SYNTHETIC_DEFAULT", "Referer": "https://www.bilibili.com/",
+                "Cookie": "SYNTHETIC_PRIVATE"}
+    request = Request(PAGE, headers={"uSeR-aGeNt": "SYNTHETIC_REQUEST", "Range": "bytes=4-9"})
+    before_defaults, before_request = defaults.copy(), dict(request.headers)
+    transport, calls = transport_with(monkeypatch, [Reply(b"<html></html>", "text/html")])
+    transport.request(request, default_headers=defaults).close()
+    assert defaults == before_defaults and dict(request.headers) == before_request
+    names = [name.lower() for name, value in calls[0].header_items()]
+    assert len(names) == len(set(names)) and names.count("user-agent") == 1
 
 
 def test_metadata_redirect_is_not_followed(monkeypatch):
