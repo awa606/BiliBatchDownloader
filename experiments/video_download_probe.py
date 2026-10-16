@@ -46,6 +46,52 @@ def sample_url(bvid, part):
     return f"https://www.bilibili.com/video/{bvid}" + (f"?p={part}" if bvid == "BV1bK411W797" else "")
 
 
+def canonical_redirect(original, status, headers, *, enabled, already_followed):
+    """Grant only an exact observed slash target. Evidence never contains input text."""
+    locations = headers.get_all("Location", []) if hasattr(headers, "get_all") else [
+        value for key, value in headers.items() if key.lower() == "location"]
+    evidence = {"http_status": status, "location_count": len(locations), "location_form": "INVALID",
+                "same_origin": False, "same_bvid": False, "same_query": False,
+                "trailing_slash_only": False, "decision": "DENY"}
+    target = None
+    reason = "location_count_invalid"
+    if len(locations) == 1:
+        location = locations[0]
+        if (not isinstance(location, str) or not location or not location.isascii()
+                or any(ord(char) <= 32 or ord(char) == 127 or char == "\\" for char in location)):
+            reason = "location_characters_invalid"
+        else:
+            try:
+                base = urllib.parse.urlsplit(original)
+                relative = location.startswith("/") and not location.startswith("//")
+                absolute = location.startswith("https://")
+                evidence["location_form"] = "ROOT_RELATIVE" if relative else "ABSOLUTE" if absolute else "OTHER"
+                parsed = urllib.parse.urlsplit("https://www.bilibili.com" + location if relative else location)
+                expected_path = base.path + "/"
+                expected_relative = expected_path + ("?" + base.query if base.query else "")
+                evidence.update(same_origin=parsed.scheme == base.scheme and parsed.netloc == base.netloc,
+                                same_bvid=parsed.path in (base.path, expected_path),
+                                same_query=parsed.query == base.query)
+                exact = location in ("https://www.bilibili.com" + expected_relative, expected_relative)
+                evidence["trailing_slash_only"] = exact
+                target = "https://www.bilibili.com" + expected_relative if exact else None
+                reason = "canonical_slash_only" if exact else "target_not_exact_canonical"
+            except ValueError:
+                reason = "location_parse_failed"
+    if status != 301:
+        reason = "status_not_301"
+    elif not enabled:
+        reason = "canonical_redirect_disabled"
+    elif already_followed:
+        reason = "page_redirect_already_followed"
+    elif original not in {sample_url(*sample) for sample in SAMPLES}:
+        reason = "not_fixed_video_page"
+    elif target:
+        evidence["decision"] = "ALLOW"
+    evidence["reason"] = reason
+    return target if evidence["decision"] == "ALLOW" else None, evidence
+
+
 def check_workdir(path, *, create):
     base = (ROOT / ".artifacts").resolve()
     resolved = path.resolve()
@@ -147,8 +193,12 @@ class LimitedReader:
 
 class BoundedTransport:
     """All yt-dlp HTTP requests, including allowed CDN redirects, pass here."""
-    def __init__(self, jar, initial_requests=0):
+    def __init__(self, jar, initial_requests=0, *, allow_canonical_redirect=False, request_limit=REQUEST_LIMIT):
         self.count, self.redirect_count = initial_requests, 0
+        self.request_limit = request_limit
+        self.allow_canonical_redirect = allow_canonical_redirect
+        self.page_redirect_count, self.page_redirect_events = 0, []
+        self.redirected_pages = set()
         self.media_urls = set()
         self.opener = urllib.request.build_opener(urllib.request.ProxyHandler({}), NoAutomaticRedirect(),
                                                  urllib.request.HTTPCookieProcessor(jar))
@@ -166,6 +216,8 @@ class BoundedTransport:
         if not isinstance(request, Request) or request.method not in ("GET", "HEAD") or request.data is not None:
             raise ProbeStop("request_shape_not_allowed")
         url = request.url
+        original = url
+        fixed_page = original in {sample_url(*sample) for sample in SAMPLES}
         media = url in self.media_urls
         parsed = urllib.parse.urlsplit(url)
         metadata = (url in {sample_url(*sample) for sample in SAMPLES}
@@ -178,14 +230,27 @@ class BoundedTransport:
                    if key.lower() not in {"cookie", "authorization", "proxy-authorization", "accept-encoding"}}
         headers["Accept-Encoding"] = "identity"
         for hop in range(3):
-            if self.count >= REQUEST_LIMIT:
+            if self.count >= self.request_limit:
                 raise ProbeStop("request_budget_exhausted")
+            if fixed_page and url != original:
+                self.redirected_pages.add(original)
+                self.page_redirect_count += 1
             self.count += 1
             try:
                 response = self.opener.open(urllib.request.Request(url, headers=headers, method=request.method), timeout=15)
             except urllib.error.HTTPError as exc:
                 status = exc.code
                 location = exc.headers.get("Location")
+                if not media and status in (301, 302, 303, 307, 308):
+                    target, event = canonical_redirect(original, status, exc.headers,
+                        enabled=self.allow_canonical_redirect, already_followed=original in self.redirected_pages)
+                    self.page_redirect_events.append(event)
+                    exc.close()
+                    if target and fixed_page:
+                        # This URL is authorized only within this request, never added to the global allowlist.
+                        url = target
+                        continue
+                    raise ProbeStop("http_or_redirect_stop", {"http_status": status, "redirect": event}) from None
                 exc.close()
                 if status in (301, 302, 303, 307, 308) and media and location:
                     next_url = urllib.parse.urljoin(url, location)
@@ -393,7 +458,7 @@ def download_one(sample, jar, transport, workdir, ffmpeg, ffprobe):
             "relative_file": f"media/{bvid}/{page['cid']}/asset.mp4", "download": "PASS", **verified}
 
 
-def run_worker(profile, workdir, ffmpeg):
+def run_worker(profile, workdir, ffmpeg, *, allow_canonical_redirect=False):
     report = {"account": "NOT_TESTED", "download": "NOT_TESTED", "assets": [], "media_attempts": 0}
     transport = None
     try:
@@ -409,7 +474,7 @@ def run_worker(profile, workdir, ffmpeg):
         report["request_count"] = client.request_count
         if account.get("account") != "PASS" or "stop_reason" in account:
             return report
-        transport = BoundedTransport(jar, client.request_count)
+        transport = BoundedTransport(jar, client.request_count, allow_canonical_redirect=allow_canonical_redirect)
         for sample in SAMPLES:
             report["media_attempts"] += 1
             report["assets"].append(download_one(sample, jar, transport, workdir, ffmpeg, ffprobe))
@@ -421,15 +486,18 @@ def run_worker(profile, workdir, ffmpeg):
                       stop_evidence={"exception_type": type(exc).__name__})
     finally:
         if transport:
-            report.update(request_count=transport.count, media_redirect_count=transport.redirect_count)
+            report.update(request_count=transport.count, media_redirect_count=transport.redirect_count,
+                          page_redirect_count=transport.page_redirect_count, page_redirect_events=transport.page_redirect_events)
     return report
 
 
-def run_bounded(profile, workdir, ffmpeg):
+def run_bounded(profile, workdir, ffmpeg, *, allow_canonical_redirect=False):
     job, process = WindowsJob(), None
     try:
         command = [sys.executable, str(Path(__file__).resolve()), "--worker", "--profile", profile,
                    "--workdir", str(workdir), "--ffmpeg", str(ffmpeg)]
+        if allow_canonical_redirect:
+            command.append("--allow-canonical-redirect")
         process = subprocess.Popen(command, stdin=subprocess.PIPE, stdout=subprocess.PIPE, stderr=subprocess.DEVNULL,
                                    text=True, encoding="utf-8", creationflags=subprocess.CREATE_NO_WINDOW)
         job.assign(process)
@@ -459,12 +527,13 @@ def main(argv=None):
     parser.add_argument("--workdir", required=True, type=Path)
     parser.add_argument("--ffmpeg", required=True, type=Path, help="Existing ffmpeg.exe; optional sibling ffprobe.exe")
     parser.add_argument("--worker", action="store_true", help=argparse.SUPPRESS)
+    parser.add_argument("--allow-canonical-redirect", action="store_true", help="Allow one strictly validated 301 slash redirect per fixed page")
     args = parser.parse_args(argv)
     if args.worker:
         if sys.stdin.readline() != "START_U02\n":
             return 2
         with open(os.devnull, "w") as quiet, contextlib.redirect_stdout(quiet), contextlib.redirect_stderr(quiet):
-            result = run_worker(args.profile, args.workdir, args.ffmpeg)
+            result = run_worker(args.profile, args.workdir, args.ffmpeg, allow_canonical_redirect=args.allow_canonical_redirect)
         print(json.dumps(result, ensure_ascii=True))
         return 0
     try:
@@ -476,12 +545,13 @@ def main(argv=None):
               "timestamp_utc": datetime.now(timezone.utc).isoformat(), "yt_dlp_required": video.PINNED_VERSION,
               "samples": [{"bvid": bvid, "part": part} for bvid, part in SAMPLES],
               "max_assets": 3, "max_height": 360, "request_limit": REQUEST_LIMIT, "worker_timeout_seconds": WORKER_TIMEOUT,
+              "allow_canonical_redirect": args.allow_canonical_redirect,
               "download": "IN_PROGRESS", "preview": "NOT_TESTED", "playback": "NOT_TESTED", "credentials_persisted": False}
     with (workdir / "report.json").open("x", encoding="utf-8") as handle:
         json.dump(report, handle)
         handle.flush()
         try:
-            report.update(run_bounded(args.profile, workdir, ffmpeg))
+            report.update(run_bounded(args.profile, workdir, ffmpeg, allow_canonical_redirect=args.allow_canonical_redirect))
         except ProbeStop as exc:
             report.update(download="BLOCKED", stop_reason=exc.reason, stop_evidence=exc.evidence)
         except Exception as exc:

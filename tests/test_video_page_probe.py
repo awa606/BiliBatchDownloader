@@ -58,9 +58,9 @@ def offline_run(monkeypatch):
         account_init(self, jar, max_requests)
         self.opener.open = opener("nav")
 
-    def initialize_page(self, jar, initial_requests=0):
+    def initialize_page(self, jar, initial_requests=0, **kwargs):
         assert initial_requests == 1
-        page_init(self, jar, initial_requests)
+        page_init(self, jar, initial_requests, **kwargs)
         self.opener.open = opener("page")
 
     monkeypatch.setattr(probe.common.BoundedClient, "__init__", initialize_account)
@@ -152,7 +152,8 @@ def test_main_guards_before_worker_and_reserves_evidence(tmp_path, monkeypatch):
     monkeypatch.setattr(probe.common, "ROOT", tmp_path)
     output = tmp_path / ".artifacts" / "evidence.json"
     calls = []
-    def run(profile):
+    def run(profile, *, allow_canonical_redirect=False):
+        assert allow_canonical_redirect is False
         calls.append(profile)
         assert json.loads(output.read_text())["page"] == "IN_PROGRESS"
         return {"page": "PASS", "request_count": 2}
@@ -172,7 +173,7 @@ def test_main_guards_before_worker_and_reserves_evidence(tmp_path, monkeypatch):
 
 def test_main_redacts_unexpected_error_and_does_not_invent_count(tmp_path, monkeypatch):
     monkeypatch.setattr(probe.common, "ROOT", tmp_path)
-    def fail(profile):
+    def fail(profile, *, allow_canonical_redirect=False):
         raise RuntimeError("PRIVATE_COOKIE_SIGNED_URL_PATH")
     monkeypatch.setattr(probe, "run_bounded", fail)
     output = tmp_path / ".artifacts" / "error.json"

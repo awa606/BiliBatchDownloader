@@ -1,4 +1,4 @@
-"""U02: one nav and one fixed webpage; no extraction APIs or media downloads."""
+"""U02: nav and one fixed webpage, optionally one strict canonical 301; no media."""
 from __future__ import annotations
 
 import argparse
@@ -25,6 +25,10 @@ WORKER_TIMEOUT = 60
 
 
 class PageTransport(download.BoundedTransport):
+    def __init__(self, jar, initial_requests=0, *, allow_canonical_redirect=False):
+        super().__init__(jar, initial_requests, allow_canonical_redirect=allow_canonical_redirect,
+                         request_limit=REQUEST_LIMIT + int(allow_canonical_redirect))
+
     def allow_media(self, urls):
         raise ProbeStop("page_probe_forbids_media")
 
@@ -34,9 +38,9 @@ class PageTransport(download.BoundedTransport):
             request = Request(request)
         if not isinstance(request, Request) or request.url != FIXED_URL:
             raise ProbeStop("fixed_page_only")
-        if self.count >= REQUEST_LIMIT:
+        if self.count >= self.request_limit:
             raise ProbeStop("request_budget_exhausted")
-        # The fixed URL is metadata, so the parent never follows redirects.
+        # The parent checks the budget before every physical request, including the opt-in hop.
         return super().request(request, default_headers=default_headers)
 
 
@@ -56,7 +60,7 @@ def page_identity(body):
     return {"bvid": FIXED_BVID, "title_present": True}
 
 
-def run_worker(profile, *, browser_confirmed):
+def run_worker(profile, *, browser_confirmed, allow_canonical_redirect=False):
     report = {"account": "NOT_TESTED", "page": "NOT_TESTED", "request_count": 0,
               "media_downloads": 0, "browser_prerequisite": "EXTERNALLY_CONFIRMED" if browser_confirmed else "MISSING"}
     client = transport = None
@@ -76,12 +80,13 @@ def run_worker(profile, *, browser_confirmed):
             raise ProbeStop("account_request_count_mismatch")
         from yt_dlp import YoutubeDL
         from yt_dlp.networking import Request
-        transport = PageTransport(jar, initial_requests=client.request_count)
+        transport = PageTransport(jar, initial_requests=client.request_count, allow_canonical_redirect=allow_canonical_redirect)
         with YoutubeDL({"quiet": True, "cachedir": False, "logger": common.QuietLogger()}, auto_init=False) as ydl:
             response = transport.request(Request(FIXED_URL), default_headers=ydl.params["http_headers"])
             try:
                 body = response.read(download.MAX_METADATA_BYTES + 1)
                 report["page_http_status"] = response.status
+                report["page_final_url"] = response.url  # Only the fixed URL or its strictly validated slash target.
             finally:
                 response.close()
         report["page_response_sha256"] = hashlib.sha256(body).hexdigest()
@@ -93,13 +98,18 @@ def run_worker(profile, *, browser_confirmed):
         report.update(page="BLOCKED", stop_reason="page_probe_failed", stop_evidence={"exception_type": type(exc).__name__})
     finally:
         report["request_count"] = transport.count if transport else client.request_count if client else 0
+        if transport:
+            report.update(page_redirect_count=transport.page_redirect_count, page_redirect_events=transport.page_redirect_events,
+                          media_redirect_count=transport.redirect_count)
     return report
 
 
-def run_bounded(profile):
+def run_bounded(profile, *, allow_canonical_redirect=False):
     job, process = download.WindowsJob(), None
     try:
         command = [sys.executable, str(Path(__file__).resolve()), "--worker", "--browser-confirmed", "--profile", profile]
+        if allow_canonical_redirect:
+            command.append("--allow-canonical-redirect")
         process = subprocess.Popen(command, stdin=subprocess.PIPE, stdout=subprocess.PIPE, stderr=subprocess.DEVNULL,
                                    text=True, encoding="utf-8", creationflags=subprocess.CREATE_NO_WINDOW)
         job.assign(process)
@@ -129,6 +139,7 @@ def main(argv=None):
     parser.add_argument("--output", type=Path)
     parser.add_argument("--browser-confirmed", action="store_true", help="Normal browser access was independently confirmed")
     parser.add_argument("--worker", action="store_true", help=argparse.SUPPRESS)
+    parser.add_argument("--allow-canonical-redirect", action="store_true", help="Allow one strictly validated 301 slash redirect")
     args = parser.parse_args(argv)
     if not args.browser_confirmed or (not args.worker and args.output is None):
         parser.error("Requires confirmed normal browser access and a new evidence output")
@@ -136,7 +147,7 @@ def main(argv=None):
         if sys.stdin.readline() != "START_U02_PAGE\n":
             return 2
         with open(os.devnull, "w") as quiet, contextlib.redirect_stdout(quiet), contextlib.redirect_stderr(quiet):
-            result = run_worker(args.profile, browser_confirmed=True)
+            result = run_worker(args.profile, browser_confirmed=True, allow_canonical_redirect=args.allow_canonical_redirect)
         print(json.dumps(result, ensure_ascii=True))
         return 0
     try:
@@ -145,7 +156,8 @@ def main(argv=None):
         parser.error("Evidence must be a new writable file inside .artifacts; no credentials read or requests sent")
     report = {"schema_version": 1, "experiment": "U02_FIXED_PAGE_AFTER_HEADER_REPAIR", "bvid": FIXED_BVID,
               "timestamp_utc": datetime.now(timezone.utc).isoformat(), "research_gate": "NEEDS_MORE_EVIDENCE",
-              "request_limit": REQUEST_LIMIT, "worker_timeout_seconds": WORKER_TIMEOUT,
+              "request_limit": REQUEST_LIMIT + int(args.allow_canonical_redirect), "worker_timeout_seconds": WORKER_TIMEOUT,
+              "allow_canonical_redirect": args.allow_canonical_redirect,
               "yt_dlp_required": download.video.PINNED_VERSION, "browser_prerequisite": "EXTERNALLY_CONFIRMED",
               "page": "IN_PROGRESS", "media_downloads": 0, "credentials_persisted": False,
               "download": "NOT_TESTED", "playback": "NOT_TESTED", "http412_causation": "NOT_PROVEN"}
@@ -153,7 +165,7 @@ def main(argv=None):
         json.dump(report, output)
         output.flush()
         try:
-            report.update(run_bounded(args.profile))
+            report.update(run_bounded(args.profile, allow_canonical_redirect=args.allow_canonical_redirect))
         except ProbeStop as exc:
             report.update(page="BLOCKED", stop_reason=exc.reason, stop_evidence=exc.evidence, request_count=None)
         except Exception as exc:
