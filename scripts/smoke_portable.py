@@ -23,7 +23,12 @@ app=subprocess.run([str(bundle/'BiliBatchDownloader.exe'),'--data-dir',str(lib.d
                     '--smoke-output',str(output/'app')],capture_output=True,env=env,timeout=25)
 if app.returncode: raise RuntimeError('frozen_ui_failed_see_local_report')
 report=json.loads((output/'app/report.json').read_text(encoding='utf-8'))
-if report['works']!=1 or report['detail_assets']!=1 or report['qt_messages']:
+# Hosted Windows desktop size may clamp the requested window. Keep that evidence,
+# while still rejecting QML/binding/plugin errors rather than ignoring all warnings.
+unexpected=[message for message in report['qt_messages']
+            if not message.startswith('QWindowsWindow::setGeometry: Unable to set geometry')]
+print(json.dumps({'frozen_ui_report':report,'unexpected_qt_messages':unexpected},ensure_ascii=False))
+if report['works']!=1 or report['detail_assets']!=1 or unexpected:
     raise RuntimeError('frozen_ui_incomplete')
 def worker(action,payload):
     return subprocess.run([str(bundle/'BiliDeskWorker.exe')],input=json.dumps(dict(data_dir=str(lib.directory),action=action,payload=payload))+'\n',
