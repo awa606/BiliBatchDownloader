@@ -3,7 +3,7 @@
 ## 响应结构与编码诊断 — 2026-10-16
 
 - 固定单页新增脱敏类型/编码/体积/签名/结构摘要，原停止条件与身份标准不变；不自动解压，不保存原HTML或头值。
-- 首次新测试34通过/5失败/2错误及定向1失败保留；修复模拟器导入顺序和Windows过长测试ID，补充非法charset分类。新增41项、全量305项通过，编译与依赖检查通过；本轮Windows CI待核验。
+- 首次新测试34通过/5失败/2错误及定向1失败保留；修复模拟器导入顺序和Windows过长测试ID，补充非法charset分类。新增41项、全量305项通过，编译与依赖检查通过；源码`a4cbf05`的[Windows CI](https://github.com/awa606/BiliBatchDownloader/actions/runs/38902152334)305项通过（Python3.13.16，9.49秒）。
 - 一次预注册实测：navPASS→严格301→200，Content-Encoding=GZIP且有GZIP签名，58,120字节；当前探针未解压即查身份，page_identity_missing。3请求0媒体，未追加实验。
 - 已定位传输层缺陷，尚未验证解压后的身份与风险标记；下一步为受限内容解码修复。旧412/301/200失败保留，Research仍NEEDS MORE EVIDENCE，无新EXE或Release。
 
