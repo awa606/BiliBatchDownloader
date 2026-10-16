@@ -2,15 +2,15 @@
 
 面向 Windows 的 B站作者作品库升级项目，目标是关注同步、作者浏览、视频与动态下载、作品预览和本地打开。
 
-**当前阶段：研究验证中，尚无新版可运行产品。** 2026-10-16 已修复受限GZIP解码：固定单页3请求通过，随后普通视频P1、多P视频P1/P2共三个资产下载、音视频合并与完整解码全部通过；下载实验19请求，两项合计22请求、零重试。本地文件身份、大小与SHA-256已复核。实际播放器、图片/动态图集、恢复及作者完整索引仍待验证；旧失败保留，旧程序继续使用。
+**当前阶段：研究验证中，尚无新版可运行产品。** 固定三个视频已完成下载、合并、完整解码及文件核验；本轮从原文件生成18张带实际帧时间的预览，截图及离线索引文件检查通过。夸克已启动，但自动化文件框绑定失败，实际播放、声音和音画同步仍需人工确认；离线HTML浏览器显示也待人工确认。图片/实况下载探针和工具已准备，尚未启动对应B站实验。Research继续为NEEDS MORE EVIDENCE。
 
 ## 已完成与待完成
 
-- 已完成：独立工程与公开仓库、锁定研究环境、真实登录与完整关注分页、普通视频与多P元数据、固定三个视频资产的真实下载/合并/完整解码、脱敏证据和离线测试。
+- 已完成：独立工程与公开仓库、锁定研究环境、真实登录与完整关注分页、普通视频与多P元数据、固定三个视频资产的真实下载/合并/完整解码、18张实际预览、图集探针加固、脱敏证据和离线测试。
 - 待验证：实际播放器、取消/恢复、动态图集、真实动图、动态视频、转发归属、作者完整作品分页。
 - 待实现：新版界面、SQLite 作品库、后台队列、内容截图、旧文件原位导入、便携 EXE。
 - 门禁：Research `NEEDS MORE EVIDENCE`；账号前提 `PASS`；最新单页及固定三资产实验 `PASS`；Design `NOT_STARTED`。
-- 工程检查：本轮本地374项离线测试通过（原305项保留，新增69项），编译和依赖检查通过；源码`8429e4a`的[本轮Windows CI](https://github.com/awa606/BiliBatchDownloader/actions/runs/38905147912)374项通过（Python3.13.16，13.19秒）。离线工程检查、真实下载与产品人工验收分别记录。
+- 工程检查：本轮本地463项通过、1项因Windows符号链接创建权限跳过；原374项覆盖保留，新增90项。包含真实FFmpeg合成媒体；编译和依赖检查通过。本轮Windows CI待提交后核验；旧CI不充作本轮结果。离线工程检查、真实下载与人工验收分别记录。
 
 首版需求与验收见[功能与验收矩阵](docs/功能与验收矩阵.md)和[维护Issue #1](https://github.com/awa606/BiliBatchDownloader/issues/1)。当前证据见[研究结果](docs/研究结果-20261016.md)，实验顺序见[研究预注册](docs/研究预注册.md)，候选比较和空决策见[研究决策记录](docs/研究决策记录.md)。
 
@@ -39,7 +39,7 @@ New-Item -ItemType Directory -Path .artifacts -Force | Out-Null
 
 ## 运行明确授权的账号验证
 
-**本轮已登记的两项在线实验完成，不追加请求。** GZIP修复后单页与三个视频资产通过；实际播放器等验收仍未执行。以下为工具说明，不是重跑指令。账号本次通过，无需重复登录；后续在线实验需登记新的输入、预算与停止条件。
+**前轮单页及三资产实验已完成；本轮图片实验尚未启动。** 当前本地播放/HTML显示为MANUAL_REQUIRED，图片实验为NOT_RUN_GATE。以下为工具说明，不是重跑指令。账号本次通过，无需重复登录；后续在线实验需登记新的输入、预算与停止条件。
 
 先在旧工具点击“打开专用 Chrome”，完成B站登录并关闭该浏览器，再使用明确指定的专用档案。不要发送 Cookie、密码或账号截图。
 
@@ -56,7 +56,7 @@ New-Item -ItemType Directory -Path .artifacts -Force | Out-Null
 
 视频、图集和动态探针位于 `experiments/`，不是应用下载入口。视频元数据探针只检查前两P的播放信息，并读取整组CID；禁止据此声称全部分P下载通过。原上游图集404失败保留；用户新样本读到4PNG及9JPG+9配套MP4，但真实媒体未验证，实况照片也不等同GIF。
 
-图集下载探针还要求明确提供的FFmpeg旁存在FFprobe，缺失时在联网前停止；本机该前提未满足。作者索引探针最多2页，仅完成离线检查；其COMPLETE只描述服务器本次可见快照，不证明所有历史或隐藏内容完整。
+图集下载探针要求明确提供的FFmpeg旁存在FFprobe，并提供固定元数据`--baseline-report`；缺失时在联网前停止。本机独立Gyan9.0.2工具对已核验，但人工播放/预览门禁未通过，不能据此直接联网。作者索引探针最多2页，仅完成离线检查；其COMPLETE只描述服务器本次可见快照，不证明所有历史或隐藏内容完整。
 
 ## 单页验证工具
 
@@ -65,6 +65,21 @@ New-Item -ItemType Directory -Path .artifacts -Force | Out-Null
 必须先独立确认正常浏览器访问并传入`--browser-confirmed`；这个参数是操作者声明，不会自行证明前提。`--output`必须是`.artifacts`内的新文件。报告只保存跳转判定和白名单结果，原HTML、原Location、陌生地址/查询、Cookie和原始异常不落盘。最终HTTP200仍需BV/标题身份检查通过；不代表真实下载通过。
 
 单页报告schema3保留`response_diagnostics`的原始字节层与`page_response_sha256`的原始完整响应语义，新增`content_decoding`及成功后的`decoded_response_diagnostics`。共享元数据层仅支持缺失/单identity和单gzip；原始与解码后各3MiB，拒绝未知/多重编码、损坏、截断、拼接成员及任何尾随数据。解码后执行原风险/API/身份检查；失败不保存部分解码内容，超原始上限只记限量前缀。媒体分支不解压，不执行脚本或放宽身份规则；验证相关词出现不能单独判定验证码。
+
+## 本地预览研究工具
+
+`experiments/local_preview_probe.py`只处理已核验下载报告中的三个固定BV/CID文件，不联网或重新下载。每项最多6张PNG，长边不超过640像素、不放大；记录实际PTS和计划时间，完全相同PNG仅合并展示，保留所有采样。源视频和原下载报告保持不变；单项私有Windows Job限60秒，截图错误、取消与下载结果分开。
+
+```powershell
+.\.venv\Scripts\python.exe experiments/local_preview_probe.py `
+  --source-report .artifacts/video-download-u02-gzip-20261016-attempt1/report.json `
+  --output .artifacts/local-preview-NEW-NAME `
+  --ffmpeg 'D:\sd.webui\dist\BiliBatchDownloader\_internal\ffmpeg\bin\ffmpeg.exe'
+```
+
+输入报告及媒体只在本机，不随仓库分发；输出目录必须全新，含`report.json`与`index.html`。本轮实际输出为`.artifacts/local-preview-u04-20261016-attempt1/`；`.artifacts`是`bili_desktop`内的子目录。预览生成PASS不代表夸克播放或HTML浏览器显示验收PASS。
+
+合成媒体测试可设置`BILI_TEST_FFMPEG`为明确选定的FFmpeg路径；不设置时相应用例跳过。Windows CI固定下载并校验Gyan9.0.2，实际生成合成PNG/JPG/视频测试，不读取私人媒体、浏览器档案或访问B站。
 
 ## 公开仓库边界
 

@@ -26,6 +26,7 @@ import video_download_probe as shared_process
 
 ROOT = Path(__file__).resolve().parents[1]
 PINNED_GALLERY = "1.32.16"
+AUTHOR_UID = "1337856191"
 SAMPLES = {
     "1249456774436618276": {"images": 4, "image_ext": "png", "live": False},
     "1257912749013336118": {"images": 9, "image_ext": "jpg", "live": True},
@@ -79,6 +80,54 @@ def source_url(dynamic_id):
     return "https://www.bilibili.com/opus/" + sample_id(dynamic_id)
 
 
+def load_baseline(path, dynamic_id):
+    """Read only the explicit small metadata report, before cookies or network."""
+    try:
+        with path.open("rb") as handle:
+            raw = handle.read(256 * 1024 + 1)
+        if len(raw) > 256 * 1024:
+            raise ValueError
+        data = json.loads(raw)
+        contract = SAMPLES[sample_id(dynamic_id)]
+        if (data.get("experiment") != "U03_gallery_metadata"
+                or data.get("status") != "METADATA_EXTRACTED_NOT_MEDIA_VERIFIED"
+                or data.get("sample_url") != source_url(dynamic_id)
+                or data.get("gallery_dl") != PINNED_GALLERY
+                or data.get("author_uid") != AUTHOR_UID
+                or type(data.get("declared_images")) is not int
+                or data["declared_images"] != contract["images"]):
+            raise ValueError
+        rows = data.get("assets")
+        expected = []
+        for number in range(1, contract["images"] + 1):
+            expected.append((number, "", contract["image_ext"]))
+            if contract["live"]:
+                expected.append((number, "l", "mp4"))
+        if not isinstance(rows, list) or len(rows) != len(expected):
+            raise ValueError
+        normalized = []
+        for row, identity in zip(rows, expected):
+            if (not isinstance(row, dict) or type(row.get("sequence")) is not int
+                    or (row["sequence"], row.get("suffix"), row.get("format")) != identity
+                    or not isinstance(row.get("source_path_sha256"), str)
+                    or not re.fullmatch(r"[0-9a-f]{64}", row["source_path_sha256"])):
+                raise ValueError
+            normalized.append({key: row[key] for key in ("sequence", "suffix", "format", "source_path_sha256")})
+        if len({row["source_path_sha256"] for row in normalized}) != len(normalized):
+            raise ValueError
+        return {"author_uid": AUTHOR_UID, "assets": normalized, "sha256": hashlib.sha256(raw).hexdigest()}
+    except (OSError, ValueError, TypeError, AttributeError):
+        raise ProbeStop("baseline_report_invalid") from None
+
+
+def validate_baseline_assets(assets, identity, baseline):
+    actual = [{"sequence": row["sequence"], "suffix": "l" if row["pair_role"] == "live_video" else "",
+               "format": row["original_extension"], "source_path_sha256": row["source_path_sha256"]}
+              for row in assets]
+    if identity != AUTHOR_UID or identity != baseline["author_uid"] or actual != baseline["assets"]:
+        raise ProbeStop("fixed_sample_baseline_mismatch")
+
+
 def check_workdir(path, *, create):
     base = (ROOT / ".artifacts").resolve()
     resolved = path.resolve()
@@ -124,6 +173,7 @@ def asset_descriptor(dynamic_id, url, metadata):
         raise ProbeStop("invalid_livephoto_pair_type")
     return {"sequence": sequence, "pair_role": "live_video" if suffix == "l" else "image",
             "original_extension": extension, "filename": f"{dynamic_id}_{sequence:03d}{suffix}.{extension}",
+            "source_path_sha256": hashlib.sha256(urllib.parse.urlsplit(url).path.encode()).hexdigest(),
             "url": url}
 
 
@@ -144,14 +194,16 @@ def validate_assets(dynamic_id, assets, declared_images):
 
 class Transport:
     """One authenticated source request; credential-free, redirect-free media requests."""
-    def __init__(self, jar, dynamic_id, deadline, *, account_requests=1):
+    def __init__(self, jar, dynamic_id, deadline, *, account_requests=1, last_request_at=None):
         self.page = source_url(dynamic_id)
         self.page_opener = urllib.request.build_opener(NoRedirect(), urllib.request.HTTPCookieProcessor(jar))
         self.media_opener = urllib.request.build_opener(NoRedirect())
         self.deadline, self.count = deadline, account_requests
         self.page_requests, self.media_requests, self.total_bytes = 0, 0, 0
         self.page_sha256, self.allowed_media = None, set()
-        self.last_request_at = 0.0
+        self.page_decoding = None
+        self.request_limit = 2 + SAMPLES[dynamic_id]["images"] * (2 if SAMPLES[dynamic_id]["live"] else 1)
+        self.last_request_at = last_request_at if last_request_at is not None else time.monotonic() if account_requests else None
 
     def remaining(self):
         left = self.deadline - time.monotonic()
@@ -161,12 +213,12 @@ class Transport:
 
     def open(self, url, *, media):
         self.remaining()
-        if self.last_request_at:
+        if self.last_request_at is not None:
             delay = max(0.0, 1.0 - (time.monotonic() - self.last_request_at))
             if delay >= self.remaining():
                 raise ProbeStop("worker_total_timeout")
             time.sleep(delay)
-        if self.count >= 2 + MAX_ASSETS:
+        if self.count >= self.request_limit:
             raise ProbeStop("request_budget_exhausted")
         self.count += 1
         self.last_request_at = time.monotonic()
@@ -178,14 +230,19 @@ class Transport:
         except ProbeStop:
             raise
         except urllib.error.HTTPError as exc:
-            raise ProbeStop("http_or_redirect_stop", {"http_status": exc.code}) from None
+            status = exc.code
+            exc.close()
+            raise ProbeStop("http_or_redirect_stop", {"http_status": status}) from None
         except Exception as exc:
             raise ProbeStop("transport_stop", {"exception_type": type(exc).__name__}) from None
         if response.status != 200:
             status = response.status
             response.close()
             raise ProbeStop("http_or_redirect_stop", {"http_status": status})
-        if response.headers.get("Content-Encoding", "identity").lower() != "identity":
+        encodings = (response.headers.get_all("Content-Encoding", []) if hasattr(response.headers, "get_all") else
+                     [value for key, value in response.headers.items() if key.lower() == "content-encoding"])
+        if media and encodings and (len(encodings) != 1 or not isinstance(encodings[0], str)
+                                    or encodings[0].strip(" \t").lower() != "identity"):
             response.close()
             raise ProbeStop("unexpected_content_encoding")
         return response
@@ -198,11 +255,20 @@ class Transport:
         self.page_requests += 1
         with self.open(target, media=False) as response:
             body = response.read(MAX_PAGE_BYTES + 1)
-        if len(body) > MAX_PAGE_BYTES:
-            raise ProbeStop("page_too_large")
-        self.page_sha256 = hashlib.sha256(body).hexdigest()
-        if b"window._riskdata_" in body:
+        raw_complete = len(body) <= MAX_PAGE_BYTES
+        raw_digest = hashlib.sha256(body).hexdigest()
+        self.page_sha256 = raw_digest if raw_complete else None
+        try:
+            body, _, self.page_decoding = shared_process.decode_metadata(body, response.headers)
+        except shared_process.ProbeStop as exc:
+            self.page_decoding = {"status": "BLOCKED", "reason": exc.reason, "raw_bytes_observed": len(body),
+                                  "raw_complete": raw_complete,
+                                  "raw_sha256" if raw_complete else "raw_prefix_sha256": raw_digest}
+            raise ProbeStop(exc.reason, exc.evidence) from None
+        if b"window._riskdata_" in body or b"window.__riskdata__" in body:
             raise ProbeStop("verification_page_detected")
+        if b'"module_blocked"' in body:
+            raise ProbeStop("blocked_gallery_module")
         return SimpleNamespace(text=body.decode("utf-8", errors="replace"))
 
     def allow_assets(self, assets):
@@ -250,7 +316,7 @@ class Transport:
         return {"size_bytes": size, "sha256": digest.hexdigest()}
 
 
-def discover_assets(dynamic_id, transport):
+def discover_assets(dynamic_id, transport, baseline):
     if importlib.metadata.version("gallery-dl") != PINNED_GALLERY:
         raise ProbeStop("gallery_version_mismatch")
     from gallery_dl import config, extractor
@@ -272,6 +338,9 @@ def discover_assets(dynamic_id, transport):
                 raise ProbeStop("multiple_directory_messages")
             identity = author_identity(message[2].get("user_id"))
             declared_images = message[2].get("count")
+            modules = message[2].get("detail", {}).get("modules", {})
+            if isinstance(modules, dict) and "module_blocked" in modules:
+                raise ProbeStop("blocked_gallery_module")
         elif message[0] == 3:
             assets.append(asset_descriptor(dynamic_id, message[1], message[2]))
             if len(assets) > MAX_ASSETS:
@@ -281,6 +350,7 @@ def discover_assets(dynamic_id, transport):
     if identity is None or transport.page_requests != 1:
         raise ProbeStop("missing_gallery_contract")
     validate_assets(dynamic_id, assets, declared_images)
+    validate_baseline_assets(assets, identity, baseline)
     return assets, identity
 
 
@@ -320,12 +390,22 @@ def inspect_asset(path, extension, ffmpeg, ffprobe, deadline):
         expected_codec = {"png": "png", "jpg": "mjpeg", "jpeg": "mjpeg"}.get(extension)
         if len(videos) != 1 or expected_codec and (len(safe_streams) != 1 or videos[0]["codec_name"] != expected_codec):
             raise ProbeStop("original_format_mismatch")
-        decoded = subprocess.run([str(ffmpeg), "-nostdin", *common, "-xerror", "-err_detect", "explode", "-i", str(path),
-                    "-map", "0:v:0", "-map", "0:a?", "-f", "null", "-"], stdout=subprocess.DEVNULL,
-                    stderr=subprocess.DEVNULL, timeout=timeout(), creationflags=getattr(subprocess, "CREATE_NO_WINDOW", 0))
+        decoded = subprocess.run([str(ffmpeg), "-nostdin", "-nostats", *common, "-xerror", "-err_detect", "explode", "-i", str(path),
+                    "-map", "0:v:0", "-map", "0:a?", "-fps_mode", "passthrough", "-progress", "pipe:1", "-f", "null", "-"], stdout=subprocess.PIPE,
+                    stderr=subprocess.DEVNULL, text=True, encoding="utf-8", timeout=timeout(),
+                    creationflags=getattr(subprocess, "CREATE_NO_WINDOW", 0))
         if decoded.returncode != 0:
             raise ProbeStop("local_decode_failed")
+        if len(decoded.stdout) > 128 * 1024:
+            raise ProbeStop("local_decode_summary_limit")
+        frames = re.findall(r"^frame=\s*([0-9]+)\s*$", decoded.stdout, re.MULTILINE)
+        if not frames or not re.search(r"^progress=end\s*$", decoded.stdout, re.MULTILINE):
+            raise ProbeStop("local_decode_summary_missing")
+        decoded_frames = int(frames[-1])
+        if decoded_frames < (2 if extension == "mp4" else 1):
+            raise ProbeStop("insufficient_decoded_frames")
         evidence = {"decode": "PASS", "streams": safe_streams, "demuxer": demuxer,
+                    "decoded_frames": decoded_frames,
                     "duration_seconds": None, "duration_evidence": "NOT_APPLICABLE_STILL_IMAGE"}
         if extension == "mp4":
             duration = float(data.get("format", {}).get("duration", "nan"))
@@ -341,7 +421,7 @@ def inspect_asset(path, extension, ffmpeg, ffprobe, deadline):
         raise ProbeStop("local_validation_error", {"exception_type": type(exc).__name__}) from None
 
 
-def run_worker(profile, dynamic_id, workdir, ffmpeg):
+def run_worker(profile, dynamic_id, workdir, ffmpeg, baseline_report, baseline_sha256):
     report = {"download": "NOT_TESTED", "assets": [], "network_requests": 0,
               "research_gate": "NEEDS_MORE_EVIDENCE", "playback": "NOT_TESTED", "preview": "NOT_TESTED"}
     client = transport = None
@@ -351,13 +431,19 @@ def run_worker(profile, dynamic_id, workdir, ffmpeg):
         dynamic_id = sample_id(dynamic_id)
         workdir = check_workdir(workdir, create=False)
         ffmpeg, ffprobe = check_ffmpeg(ffmpeg)
+        baseline = load_baseline(baseline_report, dynamic_id)
+        if baseline["sha256"] != baseline_sha256:
+            raise ProbeStop("baseline_report_changed_after_preflight")
+        report["baseline_report_sha256"] = baseline["sha256"]
         jar, _ = load_bili_cookies(profile, None)
         client = BoundedClient(jar, max_requests=1)
         account = run_account(client.get)
         if account.get("account") != "PASS":
             raise ProbeStop(account.get("stop_reason", "account_not_validated"), account.get("stop_evidence", {}))
-        transport = Transport(jar, dynamic_id, deadline, account_requests=client.request_count)
-        assets, identity = discover_assets(dynamic_id, transport)
+        transport = Transport(jar, dynamic_id, deadline, account_requests=client.request_count,
+                              last_request_at=client.last_request_at)
+        assets, identity = discover_assets(dynamic_id, transport, baseline)
+        validate_baseline_assets(assets, identity, baseline)
         transport.allow_assets(assets)
         report.update(author_uid=identity, sample_dynamic_id=dynamic_id, declared_asset_count=len(assets))
         for asset in assets:
@@ -379,15 +465,17 @@ def run_worker(profile, dynamic_id, workdir, ffmpeg):
         report["network_requests"] = transport.count if transport else client.request_count if client else 0
         if transport:
             report.update(source_response_sha256=transport.page_sha256, source_requests=transport.page_requests,
+                          source_metadata_decoding=transport.page_decoding, request_limit=transport.request_limit,
                           media_requests=transport.media_requests, total_media_bytes=transport.total_bytes)
     return report
 
 
-def run_bounded(profile, dynamic_id, workdir, ffmpeg):
+def run_bounded(profile, dynamic_id, workdir, ffmpeg, baseline_report, baseline_sha256):
     job, process = WindowsJob(), None
     try:
         command = [sys.executable, str(Path(__file__).resolve()), "--worker", "--profile", profile,
-                   "--sample", dynamic_id, "--workdir", str(workdir), "--ffmpeg", str(ffmpeg)]
+                   "--sample", dynamic_id, "--workdir", str(workdir), "--ffmpeg", str(ffmpeg),
+                   "--baseline-report", str(baseline_report), "--baseline-sha256", baseline_sha256]
         process = subprocess.Popen(command, stdin=subprocess.PIPE, stdout=subprocess.PIPE, stderr=subprocess.DEVNULL,
                     text=True, encoding="utf-8", creationflags=getattr(subprocess, "CREATE_NO_WINDOW", 0))
         job.assign(process)
@@ -416,18 +504,21 @@ def main(argv=None):
     parser.add_argument("--sample", required=True, help="One of the two preregistered dynamic IDs or exact URLs")
     parser.add_argument("--workdir", required=True, type=Path)
     parser.add_argument("--ffmpeg", required=True, type=Path)
+    parser.add_argument("--baseline-report", required=True, type=Path)
+    parser.add_argument("--baseline-sha256", help=argparse.SUPPRESS)
     parser.add_argument("--worker", action="store_true", help=argparse.SUPPRESS)
     args = parser.parse_args(argv)
     if args.worker:
-        if sys.stdin.readline() != START_TOKEN:
+        if sys.stdin.readline() != START_TOKEN or not re.fullmatch(r"[0-9a-f]{64}", args.baseline_sha256 or ""):
             return 2
         with open(os.devnull, "w") as quiet, contextlib.redirect_stdout(quiet), contextlib.redirect_stderr(quiet):
-            result = run_worker(args.profile, args.sample, args.workdir, args.ffmpeg)
+            result = run_worker(args.profile, args.sample, args.workdir, args.ffmpeg, args.baseline_report, args.baseline_sha256)
         print(json.dumps(result, ensure_ascii=True))
         return 0
     try:
         dynamic_id = sample_id(args.sample)
         ffmpeg, _ = check_ffmpeg(args.ffmpeg)
+        baseline = load_baseline(args.baseline_report, dynamic_id)
         workdir = check_workdir(args.workdir, create=True)
     except ProbeStop as exc:
         parser.error(exc.reason)
@@ -435,6 +526,7 @@ def main(argv=None):
         parser.error("Use one fixed sample, a new .artifacts/gallery-download-NAME directory, and existing FFmpeg/ffprobe")
     report = {"schema_version": 1, "experiment": "U03_GALLERY_DOWNLOAD", "timestamp_utc": datetime.now(timezone.utc).isoformat(),
               "sample_dynamic_id": dynamic_id, "gallery_dl_required": PINNED_GALLERY, "download": "IN_PROGRESS",
+              "baseline_report_sha256": baseline["sha256"],
               "research_gate": "NEEDS_MORE_EVIDENCE", "max_assets": MAX_ASSETS, "max_asset_bytes": MAX_ASSET_BYTES,
               "max_total_bytes": MAX_TOTAL_BYTES, "worker_timeout_seconds": WORKER_TIMEOUT,
               "credentials_persisted": False, "source_urls_persisted": False, "raw_stderr_persisted": False,
@@ -443,7 +535,7 @@ def main(argv=None):
         json.dump(report, handle)
         handle.flush()
         try:
-            report.update(run_bounded(args.profile, dynamic_id, workdir, ffmpeg))
+            report.update(run_bounded(args.profile, dynamic_id, workdir, ffmpeg, args.baseline_report, baseline["sha256"]))
         except ProbeStop as exc:
             report.update(download="BLOCKED", stop_reason=exc.reason, stop_evidence=exc.evidence)
         except Exception as exc:

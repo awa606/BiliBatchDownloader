@@ -19,5 +19,20 @@ jobs:
         run: python -m compileall -q experiments
       - name: Create isolated test output parent
         run: New-Item -ItemType Directory -Path .artifacts -Force | Out-Null
+      - name: Prepare checksum-pinned FFmpeg for synthetic media checks
+        shell: pwsh
+        run: |
+          $toolRoot = Join-Path $env:GITHUB_WORKSPACE '.artifacts/tools'
+          New-Item -ItemType Directory -Path $toolRoot -ErrorAction Stop | Out-Null
+          $zip = Join-Path $toolRoot 'ffmpeg-9.0.2-essentials_build.zip'
+          Invoke-WebRequest -Uri 'https://github.com/GyanD/codexffmpeg/releases/download/9.0.2/ffmpeg-9.0.2-essentials_build.zip' -OutFile $zip -TimeoutSec 180
+          $expected = '60f467265b1e312373dbcd92200c2618a74850f98d3d078e94296bb3fa2047ba'
+          if ((Get-FileHash -LiteralPath $zip -Algorithm SHA256).Hash.ToLowerInvariant() -ne $expected) { throw 'FFmpeg publisher checksum mismatch' }
+          Expand-Archive -LiteralPath $zip -DestinationPath $toolRoot -ErrorAction Stop
+          $ffmpeg = Join-Path $toolRoot 'ffmpeg-9.0.2-essentials_build/bin/ffmpeg.exe'
+          $ffprobe = Join-Path $toolRoot 'ffmpeg-9.0.2-essentials_build/bin/ffprobe.exe'
+          & $ffmpeg -version | Select-Object -First 1
+          & $ffprobe -version | Select-Object -First 1
+          "BILI_TEST_FFMPEG=$ffmpeg" | Out-File -FilePath $env:GITHUB_ENV -Append -Encoding utf8
       - name: Test synthetic contracts only
         run: python -m pytest -q --basetemp=.artifacts/pytest-ci --junitxml=.artifacts/tests.xml

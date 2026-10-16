@@ -1,7 +1,10 @@
 import hashlib
+import gzip
 import http.cookiejar
 import io
 import json
+import os
+from email.message import Message
 from pathlib import Path
 import subprocess
 import sys
@@ -25,6 +28,7 @@ def prohibit_real_network(monkeypatch):
     def blocked(*args, **kwargs):
         raise AssertionError("Offline test attempted network")
     monkeypatch.setattr(urllib.request.OpenerDirector, "open", blocked)
+    monkeypatch.setattr(probe, "load_bili_cookies", blocked)
 
 
 def assets(dynamic_id=STILL):
@@ -39,6 +43,23 @@ def assets(dynamic_id=STILL):
                 f"https://upos-sz-mirrorcos.bilivideo.com/live{number}.mp4?token={PRIVATE}",
                 {"num": number, "suffix": "l"}))
     return result
+
+
+def baseline(dynamic_id=STILL, rows=None):
+    rows = assets(dynamic_id) if rows is None else rows
+    return {"author_uid": probe.AUTHOR_UID, "sha256": "a" * 64, "assets": [
+        {"sequence": row["sequence"], "suffix": "l" if row["pair_role"] == "live_video" else "",
+         "format": row["original_extension"], "source_path_sha256": row["source_path_sha256"]} for row in rows]}
+
+
+def write_baseline(tmp_path, dynamic_id=STILL):
+    data = {"experiment": "U03_gallery_metadata", "status": "METADATA_EXTRACTED_NOT_MEDIA_VERIFIED",
+            "sample_url": probe.source_url(dynamic_id), "gallery_dl": probe.PINNED_GALLERY,
+            "author_uid": probe.AUTHOR_UID, "declared_images": probe.SAMPLES[dynamic_id]["images"],
+            "assets": baseline(dynamic_id)["assets"]}
+    path = tmp_path / "baseline.json"
+    path.write_text(json.dumps(data), encoding="utf-8")
+    return path
 
 
 class Reply(io.BytesIO):
@@ -108,7 +129,8 @@ def test_missing_ffprobe_stops_cli_before_credentials_network_or_evidence(tmp_pa
     monkeypatch.setattr(probe, "load_bili_cookies", lambda *a: pytest.fail("Credentials accessed before prerequisite gate"))
     monkeypatch.setattr(probe, "run_bounded", lambda *a: pytest.fail("Worker started before prerequisite gate"))
     with pytest.raises(SystemExit) as error:
-        probe.main(["--profile", PRIVATE, "--sample", STILL, "--workdir", str(target), "--ffmpeg", str(ffmpeg)])
+        probe.main(["--profile", PRIVATE, "--sample", STILL, "--workdir", str(target), "--ffmpeg", str(ffmpeg),
+                    "--baseline-report", str(tmp_path / "not-read-before-tool-check.json")])
     assert error.value.code == 2
     assert "ffprobe_required_for_gallery_verification" in capsys.readouterr().err
     assert not target.exists()
@@ -255,13 +277,13 @@ def test_discovery_uses_only_bounded_source_request(monkeypatch):
             pass
         def __iter__(self):
             self.request(probe.source_url(LIVE))
-            yield (2, "", {"user_id": 123, "count": 9})
+            yield (2, "", {"user_id": int(probe.AUTHOR_UID), "count": 9})
             for row in assets(LIVE):
                 yield (3, row["url"], {"num": row["sequence"], "suffix": "l" if row["pair_role"] == "live_video" else ""})
     monkeypatch.setattr(extractor, "find", lambda _: BilibiliArticleExtractor())
     monkeypatch.setattr(probe.importlib.metadata, "version", lambda _: probe.PINNED_GALLERY)
-    rows, identity = probe.discover_assets(LIVE, instance)
-    assert identity == "123" and len(rows) == 18 and len(calls) == 1
+    rows, identity = probe.discover_assets(LIVE, instance, baseline(LIVE))
+    assert identity == probe.AUTHOR_UID and len(rows) == 18 and len(calls) == 1
 
 
 def test_local_decode_records_only_allowed_fields(monkeypatch, tmp_path):
@@ -270,10 +292,10 @@ def test_local_decode_records_only_allowed_fields(monkeypatch, tmp_path):
     calls = []
     def run(command, **kwargs):
         calls.append((command, kwargs))
-        return SimpleNamespace(returncode=0, stdout=json.dumps(data))
+        return SimpleNamespace(returncode=0, stdout="frame=63\nprogress=end\n" if "-progress" in command else json.dumps(data))
     monkeypatch.setattr(probe.subprocess, "run", run)
     report = probe.inspect_asset(tmp_path / "sample.mp4", "mp4", Path("ffmpeg.exe"), Path("ffprobe.exe"), time.monotonic() + 180)
-    assert report["decode"] == "PASS" and report["duration_seconds"] == 2.52
+    assert report["decode"] == "PASS" and report["duration_seconds"] == 2.52 and report["decoded_frames"] == 63
     assert len(calls) == 2 and all(kw["stderr"] == subprocess.DEVNULL for _, kw in calls)
     assert "null" in calls[1][0] and "-xerror" in calls[1][0]
     assert PRIVATE not in json.dumps(report)
@@ -296,11 +318,13 @@ def test_worker_does_not_persist_urls_or_private_error_text(monkeypatch, tmp_pat
     monkeypatch.setattr(probe, "check_ffmpeg", lambda path: (path, path))
     monkeypatch.setattr(probe, "load_bili_cookies", lambda *args: (http.cookiejar.CookieJar(), {}))
     monkeypatch.setattr(probe, "run_account", lambda get: {"account": "PASS"})
-    monkeypatch.setattr(probe, "discover_assets", lambda *args: (rows, "123"))
+    monkeypatch.setattr(probe, "discover_assets", lambda *args: (rows, probe.AUTHOR_UID))
     def fail(*args):
         raise RuntimeError(PRIVATE)
     monkeypatch.setattr(probe.Transport, "download", fail)
-    report = probe.run_worker(PRIVATE, STILL, tmp_path, Path("ffmpeg.exe"))
+    baseline_path = write_baseline(tmp_path)
+    report = probe.run_worker(PRIVATE, STILL, tmp_path, Path("ffmpeg.exe"), baseline_path,
+                              hashlib.sha256(baseline_path.read_bytes()).hexdigest())
     assert report["download"] == "BLOCKED"
     assert report["research_gate"] == "NEEDS_MORE_EVIDENCE"
     assert PRIVATE not in json.dumps(report) and "https://" not in json.dumps(report)
@@ -343,10 +367,10 @@ def test_parent_job_assignment_and_timeout_lifecycle(monkeypatch, tmp_path, scen
     monkeypatch.setattr(probe.subprocess, "Popen", lambda *args, **kwargs: process)
     if scenario == "assignment_failure":
         with pytest.raises(probe.ProbeStop):
-            probe.run_bounded(PRIVATE, STILL, tmp_path, Path("ffmpeg.exe"))
+            probe.run_bounded(PRIVATE, STILL, tmp_path, Path("ffmpeg.exe"), tmp_path / "baseline.json", "a" * 64)
         assert "start" not in events and "killed" in events
     else:
-        report = probe.run_bounded(PRIVATE, STILL, tmp_path, Path("ffmpeg.exe"))
+        report = probe.run_bounded(PRIVATE, STILL, tmp_path, Path("ffmpeg.exe"), tmp_path / "baseline.json", "a" * 64)
         assert report["download"] == ("BLOCKED" if scenario == "timeout" else "PASS")
         if scenario == "timeout":
             assert report["stop_reason"] == "worker_total_timeout"
@@ -356,4 +380,242 @@ def test_parent_job_assignment_and_timeout_lifecycle(monkeypatch, tmp_path, scen
 def test_worker_requires_parent_start_token_before_work(monkeypatch):
     monkeypatch.setattr(probe.sys, "stdin", io.StringIO("wrong\n"))
     monkeypatch.setattr(probe, "run_worker", lambda *args: pytest.fail("worker started without handshake"))
-    assert probe.main(["--worker", "--profile", PRIVATE, "--sample", STILL, "--workdir", "ignored", "--ffmpeg", "ignored"]) == 2
+    assert probe.main(["--worker", "--profile", PRIVATE, "--sample", STILL, "--workdir", "ignored", "--ffmpeg", "ignored",
+                       "--baseline-report", "ignored"]) == 2
+
+
+def synthetic_page(dynamic_id=STILL, *, uid=probe.AUTHOR_UID, blocked=False):
+    rows = assets(dynamic_id)
+    pictures = []
+    for row in rows:
+        if row["pair_role"] == "image":
+            pictures.append({"url": row["url"], "width": 32, "height": 24})
+        else:
+            pictures[-1]["live_url"] = row["url"]
+    modules = [{"module_type": "MODULE_AUTHOR", "module_author": {"mid": uid, "name": "Synthetic", "pub_ts": 1}},
+               {"module_type": "MODULE_TOP", "module_top": {"display": {"album": {"pics": pictures}}}}]
+    if blocked:
+        modules.append({"module_type": "MODULE_BLOCKED", "module_blocked": {"hint_message": PRIVATE}})
+    return ("<html><script>window.__INITIAL_STATE__=" + json.dumps({"id": dynamic_id, "detail": {"modules": modules}})
+            + ";</script></html>").encode()
+
+
+@pytest.mark.parametrize("dynamic_id", [STILL, LIVE])
+def test_real_upstream_extractor_consumes_decoded_page_and_matches_baseline(dynamic_id, monkeypatch):
+    page = synthetic_page(dynamic_id)
+    raw = gzip.compress(page, mtime=0)
+    instance, calls = transport(monkeypatch, [Reply(raw, headers={"Content-Encoding": "GZip"})], dynamic_id)
+    actual, uid = probe.discover_assets(dynamic_id, instance, baseline(dynamic_id))
+    assert uid == probe.AUTHOR_UID and actual == assets(dynamic_id)
+    assert len(calls) == 1 and instance.media_requests == 0
+    assert instance.page_sha256 == hashlib.sha256(raw).hexdigest()
+    assert instance.page_decoding == {"status": "DECODED", "encoding": "GZIP", "raw_bytes": len(raw),
+        "decoded_bytes": len(page), "raw_sha256": hashlib.sha256(raw).hexdigest(),
+        "decoded_sha256": hashlib.sha256(page).hexdigest()}
+    assert PRIVATE not in json.dumps(instance.page_decoding)
+
+
+@pytest.mark.parametrize("marker,reason", [(b"window._riskdata_", "verification_page_detected"),
+                                          (b"window.__riskdata__", "verification_page_detected"),
+                                          (b'"module_blocked"', "blocked_gallery_module")])
+@pytest.mark.parametrize("compressed", [False, True])
+def test_risk_and_blocked_pages_stop_before_gallery_or_media(marker, reason, compressed, monkeypatch):
+    raw = gzip.compress(marker, mtime=0) if compressed else marker
+    instance, calls = transport(monkeypatch, [Reply(raw, headers={"Content-Encoding": "gzip"} if compressed else {})])
+    with pytest.raises(probe.ProbeStop, match=reason):
+        instance.fetch_page(probe.source_url(STILL))
+    assert len(calls) == 1 and instance.media_requests == 0
+    assert instance.page_decoding["status"] == ("DECODED" if compressed else "PASS_THROUGH")
+
+
+def test_structural_blocked_module_cannot_hide_behind_json_unicode_escape(monkeypatch):
+    page = synthetic_page(blocked=True).replace(b'"module_blocked"', b'"module_\\u0062locked"')
+    instance, calls = transport(monkeypatch, [Reply(page)])
+    with pytest.raises(probe.ProbeStop, match="blocked_gallery_module"):
+        probe.discover_assets(STILL, instance, baseline())
+    assert len(calls) == 1 and instance.media_requests == 0
+
+
+@pytest.mark.parametrize("raw,headers,reason", [
+    (b"not-gzip", {"Content-Encoding": "gzip"}, "metadata_gzip_invalid"),
+    (b"x" * (probe.MAX_PAGE_BYTES + 1), {}, "metadata_size_limit"),
+    (gzip.compress(b"x" * (probe.MAX_PAGE_BYTES + 1), mtime=0), {"Content-Encoding": "gzip"}, "metadata_decoded_size_limit"),
+    (b"page", {"Content-Encoding": "br"}, "content_encoding_unsupported")],
+    ids=["invalid-gzip", "raw-over-limit", "decoded-over-limit", "unsupported-encoding"])
+def test_page_decoding_limits_are_wired_to_shared_decoder(raw, headers, reason, monkeypatch):
+    instance, calls = transport(monkeypatch, [Reply(raw, headers=headers)])
+    with pytest.raises(probe.ProbeStop, match=reason):
+        instance.fetch_page(probe.source_url(STILL))
+    assert len(calls) == 1 and instance.media_requests == 0
+    assert instance.page_decoding["status"] == "BLOCKED" and instance.page_decoding["reason"] == reason
+    if reason == "metadata_size_limit":
+        assert instance.page_sha256 is None and instance.page_decoding["raw_complete"] is False
+        assert "raw_sha256" not in instance.page_decoding and "decoded_sha256" not in instance.page_decoding
+        assert instance.page_decoding["raw_prefix_sha256"] == hashlib.sha256(raw).hexdigest()
+    else:
+        assert instance.page_decoding["raw_complete"] is True
+        assert instance.page_decoding["raw_sha256"] == hashlib.sha256(raw).hexdigest()
+
+
+@pytest.mark.parametrize("encodings", [("identity", "identity"), ("",), ("br",), ("gzip",), ("identity, gzip",)])
+def test_media_encoding_cannot_borrow_page_gzip_support(encodings, tmp_path, monkeypatch):
+    headers = Message()
+    for encoding in encodings:
+        headers["Content-Encoding"] = encoding
+    instance, calls = transport(monkeypatch, [Reply(b"original", headers=headers)])
+    row = assets()[0]
+    instance.allow_assets([row])
+    with pytest.raises(probe.ProbeStop, match="unexpected_content_encoding"):
+        instance.download(row, tmp_path / row["filename"])
+    assert len(calls) == 1 and not list(tmp_path.iterdir())
+
+
+@pytest.mark.parametrize("dynamic_id,limit", [(STILL, 6), (LIVE, 20)])
+def test_per_sample_request_budget_includes_account_source_and_all_assets(dynamic_id, limit, tmp_path, monkeypatch):
+    rows = assets(dynamic_id)
+    instance, calls = transport(monkeypatch, [Reply(b"page")] + [Reply(b"media") for _ in rows], dynamic_id)
+    instance.fetch_page(probe.source_url(dynamic_id))
+    instance.allow_assets(rows)
+    for row in rows:
+        instance.download(row, tmp_path / row["filename"])
+    assert instance.request_limit == instance.count == limit and len(calls) == limit - 1
+    with pytest.raises(probe.ProbeStop, match="request_budget_exhausted"):
+        instance.open(probe.source_url(dynamic_id), media=False)
+    assert len(calls) == limit - 1
+
+
+def test_account_to_source_interval_is_at_least_one_second(monkeypatch):
+    clock = [100.25]
+    monkeypatch.setattr(probe.time, "monotonic", lambda: clock[0])
+    sleeps = []
+    def sleep(delay):
+        sleeps.append(delay)
+        clock[0] += delay
+    monkeypatch.setattr(probe.time, "sleep", sleep)
+    instance = probe.Transport(http.cookiejar.CookieJar(), STILL, 280, account_requests=1, last_request_at=100)
+    def open_page(request, timeout):
+        assert clock[0] >= 101 and timeout == 15
+        return Reply(b"page")
+    monkeypatch.setattr(instance.page_opener, "open", open_page)
+    instance.fetch_page(probe.source_url(STILL))
+    assert sleeps == [0.75] and instance.count == 2
+
+
+@pytest.mark.parametrize("dynamic_id", [STILL, LIVE])
+def test_baseline_report_is_bound_to_original_content_identity(dynamic_id, tmp_path):
+    path = write_baseline(tmp_path, dynamic_id)
+    result = probe.load_baseline(path, dynamic_id)
+    assert result["author_uid"] == probe.AUTHOR_UID and result["assets"] == baseline(dynamic_id)["assets"]
+    assert result["sha256"] == hashlib.sha256(path.read_bytes()).hexdigest()
+    probe.validate_baseline_assets(assets(dynamic_id), probe.AUTHOR_UID, result)
+
+
+@pytest.mark.parametrize("change", ["sample", "uid", "status", "version", "declared", "order", "format", "hash", "duplicate_hash"])
+def test_invalid_baseline_report_is_rejected_without_network(change, tmp_path):
+    path = write_baseline(tmp_path)
+    data = json.loads(path.read_text())
+    if change == "sample": data["sample_url"] = probe.source_url(LIVE)
+    elif change == "uid": data["author_uid"] = "123"
+    elif change == "status": data["status"] = "FAILED"
+    elif change == "version": data["gallery_dl"] = "0.0"
+    elif change == "declared": data["declared_images"] = True
+    elif change == "order": data["assets"].reverse()
+    elif change == "format": data["assets"][0]["format"] = "mp4"
+    elif change == "hash": data["assets"][0]["source_path_sha256"] = PRIVATE
+    else: data["assets"][1]["source_path_sha256"] = data["assets"][0]["source_path_sha256"]
+    path.write_text(json.dumps(data))
+    with pytest.raises(probe.ProbeStop, match="baseline_report_invalid") as stopped:
+        probe.load_baseline(path, STILL)
+    assert PRIVATE not in str(stopped.value.evidence)
+
+
+@pytest.mark.parametrize("change", ["uid", "order", "format", "path"])
+def test_discovered_content_must_match_fixed_baseline(change):
+    rows, uid = assets(), probe.AUTHOR_UID
+    if change == "uid": uid = "123"
+    elif change == "order": rows.reverse()
+    elif change == "format": rows[0]["original_extension"] = "jpg"
+    else: rows[0]["source_path_sha256"] = "f" * 64
+    with pytest.raises(probe.ProbeStop, match="fixed_sample_baseline_mismatch"):
+        probe.validate_baseline_assets(rows, uid, baseline())
+
+
+def test_signed_query_refresh_does_not_change_source_path_identity():
+    original = assets()[0]
+    changed = probe.asset_descriptor(STILL, original["url"].replace(PRIVATE, "CHANGED_QUERY"), {"num": 1})
+    assert original["source_path_sha256"] == changed["source_path_sha256"]
+    rows = assets()
+    rows[0] = changed
+    probe.validate_baseline_assets(rows, probe.AUTHOR_UID, baseline())
+
+
+def test_missing_baseline_is_cli_error_before_creds_or_output(tmp_path, monkeypatch, capsys):
+    target = tmp_path / "gallery-download-not-created"
+    monkeypatch.setattr(probe, "run_bounded", lambda *a: pytest.fail("Worker started without baseline"))
+    with pytest.raises(SystemExit) as stopped:
+        probe.main(["--profile", PRIVATE, "--sample", STILL, "--workdir", str(target), "--ffmpeg", "ignored"])
+    assert stopped.value.code == 2 and "--baseline-report" in capsys.readouterr().err
+    assert not target.exists()
+
+
+def test_worker_rejects_changed_baseline_before_loading_credentials(tmp_path, monkeypatch):
+    baseline_path = write_baseline(tmp_path)
+    fingerprint = hashlib.sha256(baseline_path.read_bytes()).hexdigest()
+    baseline_path.write_text(baseline_path.read_text() + " ")  # Same JSON, different recorded evidence.
+    monkeypatch.setattr(probe, "check_workdir", lambda path, create: path)
+    monkeypatch.setattr(probe, "check_ffmpeg", lambda path: (path, path))
+    result = probe.run_worker(PRIVATE, STILL, tmp_path, Path("ffmpeg.exe"), baseline_path, fingerprint)
+    assert result["stop_reason"] == "baseline_report_changed_after_preflight" and result["network_requests"] == 0
+
+
+def test_worker_requires_parent_baseline_fingerprint(monkeypatch):
+    monkeypatch.setattr(probe.sys, "stdin", io.StringIO(probe.START_TOKEN))
+    monkeypatch.setattr(probe, "run_worker", lambda *args: pytest.fail("Worker started without baseline fingerprint"))
+    assert probe.main(["--worker", "--profile", PRIVATE, "--sample", STILL, "--workdir", "ignored", "--ffmpeg", "ignored",
+                       "--baseline-report", "ignored"]) == 2
+
+
+@pytest.mark.parametrize("frames,ended,reason", [(0, True, "insufficient_decoded_frames"),
+    (1, True, "insufficient_decoded_frames"), (2, False, "local_decode_summary_missing")])
+def test_live_video_needs_two_actually_decoded_frames_and_completion(frames, ended, reason, monkeypatch, tmp_path):
+    data = {"streams": [{"codec_type": "video", "codec_name": "h264", "width": 32, "height": 24}], "format": {"duration": "1"}}
+    def run(command, **kwargs):
+        return SimpleNamespace(returncode=0, stdout=(f"frame={frames}\nprogress={'end' if ended else 'continue'}\n"
+                                                     if "-progress" in command else json.dumps(data)))
+    monkeypatch.setattr(probe.subprocess, "run", run)
+    with pytest.raises(probe.ProbeStop, match=reason):
+        probe.inspect_asset(tmp_path / "synthetic.mp4", "mp4", Path("ffmpeg.exe"), Path("ffprobe.exe"), time.monotonic() + 180)
+
+
+def test_live_video_with_two_decoded_frames_does_not_require_audio(monkeypatch, tmp_path):
+    data = {"streams": [{"codec_type": "video", "codec_name": "h264", "width": 32, "height": 24}], "format": {"duration": "1"}}
+    def run(command, **kwargs):
+        if "-progress" in command:
+            assert "0:a?" in command
+            assert command[command.index("-fps_mode") + 1] == "passthrough"
+        return SimpleNamespace(returncode=0, stdout="frame=2\nprogress=end\n" if "-progress" in command else json.dumps(data))
+    monkeypatch.setattr(probe.subprocess, "run", run)
+    result = probe.inspect_asset(tmp_path / "synthetic.mp4", "mp4", Path("ffmpeg.exe"), Path("ffprobe.exe"), time.monotonic() + 180)
+    assert result["decoded_frames"] == 2 and len(result["streams"]) == 1
+
+
+@pytest.mark.parametrize("extension,frames", [("png", 1), ("jpg", 1), ("mp4", 3), ("mp4", 1)])
+def test_real_ffmpeg_synthetic_original_images_and_live_video(extension, frames, tmp_path):
+    binary = os.environ.get("BILI_TEST_FFMPEG")
+    if not binary:
+        pytest.skip("Set BILI_TEST_FFMPEG to the verified local FFmpeg for synthetic integration")
+    ffmpeg, ffprobe = probe.check_ffmpeg(Path(binary))
+    target = tmp_path / f"synthetic-{frames}.{extension}"
+    command = [str(ffmpeg), "-nostdin", "-v", "error", "-f", "lavfi", "-i", "testsrc=size=32x24:rate=3",
+               "-frames:v", str(frames), "-an"]
+    command += ["-c:v", "libx264", "-pix_fmt", "yuv420p"] if extension == "mp4" else ["-update", "1"]
+    created = subprocess.run([*command, str(target)], stdout=subprocess.PIPE, stderr=subprocess.PIPE,
+        timeout=20, creationflags=getattr(subprocess, "CREATE_NO_WINDOW", 0))
+    assert created.returncode == 0, "Synthetic FFmpeg fixture generation failed"
+    if extension == "mp4" and frames == 1:
+        with pytest.raises(probe.ProbeStop, match="insufficient_decoded_frames"):
+            probe.inspect_asset(target, extension, ffmpeg, ffprobe, time.monotonic() + 180)
+    else:
+        result = probe.inspect_asset(target, extension, ffmpeg, ffprobe, time.monotonic() + 180)
+        assert result["decoded_frames"] == frames and result["decode"] == "PASS"
+        assert [stream["codec_type"] for stream in result["streams"]] == ["video"]
