@@ -8,6 +8,7 @@ from PySide6.QtCore import QObject,Property,Signal,Slot,QProcess,QTimer,QUrl
 from PySide6.QtGui import QDesktopServices
 
 from .library import Library
+from .media import check_local_file
 from .paths import resource_root,worker_command
 from .process import Job
 
@@ -22,17 +23,21 @@ ERRORS={'local_file_missing':'文件已不存在，请检查原路径。','local
 class Bridge(QObject):
     changed=Signal()
     finishedQuery=Signal(int,object)
+    finishedLocal=Signal(object)
 
     def __init__(self,directory):
         super().__init__()
         self.lib=Library(directory); self.lib.initialize(); self.lib.recover()
         self.pool=ThreadPoolExecutor(max_workers=2)
+        self.local_pool=ThreadPoolExecutor(max_workers=1)
+        self._opening=set(); self._closing=False
         self._authors=[]; self._works=[]; self._detail={}; self._tasks=[]; self._message=''
         self._total=0; self._offset=0; self._uid=''; self._search=''; self._category=''; self._undownloaded=False
         self._bvid=''; self._revision=0; self._paused=self.lib.setting('paused','1')=='1'
         self.process=None; self.job=None; self.active=None; self.buffer=bytearray(); self.terminal=False
         self._online=self._feature()
         self.finishedQuery.connect(self._receive)
+        self.finishedLocal.connect(self._receiveLocal)
         self.timer=QTimer(self); self.timer.setInterval(500); self.timer.timeout.connect(self.tick); self.timer.start()
         self.refresh()
 
@@ -151,8 +156,28 @@ class Bridge(QObject):
 
     @Slot(str,bool)
     def openLocal(self,cid,folder):
-        self.lib.enqueue('check_file',dict(bvid=self._bvid,cid=cid,folder=folder),'open:'+self._bvid+':'+cid)
-        self.refresh()
+        key=(self._bvid,cid,bool(folder))
+        if self._closing or key in self._opening: return
+        self._opening.add(key); self.tell('正在打开所在文件夹…' if folder else '正在交给默认播放器…')
+        future=self.local_pool.submit(check_local_file,self.lib,*key)
+        def done(f):
+            try: result={'key':key,'file':f.result()}
+            except Exception as exc:
+                reason=str(exc) if isinstance(exc,ValueError) and str(exc) in ('local_file_missing','local_file_changed') else 'local_open_failed'
+                result={'key':key,'error':reason}
+            if not self._closing: self.finishedLocal.emit(result)
+        future.add_done_callback(done)
+
+    @Slot(object)
+    def _receiveLocal(self,result):
+        self._opening.discard(result['key'])
+        if self._closing: return
+        if result.get('error'):
+            self.tell(ERRORS.get(result['error'],'无法读取本地文件，请检查文件权限和磁盘连接。')); return
+        file=result['file']; path=Path(file['path']); path=path.parent if file['folder'] else path
+        if QDesktopServices.openUrl(QUrl.fromLocalFile(str(path))):
+            self.tell('已交给系统打开文件夹。' if file['folder'] else '已交给默认播放器；启动速度取决于播放器。')
+        else: self.tell('默认程序启动失败，请检查系统文件关联。')
 
     @Slot()
     def togglePause(self):
@@ -255,6 +280,7 @@ class Bridge(QObject):
         self.active=None; self.refresh()
 
     def shutdown(self):
+        self._closing=True
         self.timer.stop()
         if self.active and not self.terminal:
             self.lib.update_task(self.active['id'],state='interrupted',error='app_closed',phase='退出时中断，等待重试')
@@ -262,3 +288,4 @@ class Bridge(QObject):
         if self.job: self.job.close()
         if self.process: self.process.kill(); self.process.waitForFinished(3000)
         self.pool.shutdown(wait=True,cancel_futures=True)
+        self.local_pool.shutdown(wait=True,cancel_futures=True)

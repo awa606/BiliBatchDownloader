@@ -15,6 +15,20 @@ def digest(path):
     return h.hexdigest()
 
 
+def check_local_file(library,bvid,cid,folder=False):
+    """Small offline check shared by the worker and independent local-open lane."""
+    detail=library.detail(bvid)
+    asset=next((a for a in detail.get('assets',[]) if str(a['cid'])==str(cid)),None)
+    if not asset or not asset['path']: raise ValueError('local_file_missing')
+    path=Path(asset['path'])
+    try:
+        if not path.is_file(): raise ValueError('local_file_missing')
+        if path.stat().st_size!=asset['size']: raise ValueError('local_file_changed')
+    except FileNotFoundError:
+        raise ValueError('local_file_missing') from None
+    return {'path':str(path),'folder':bool(folder)}
+
+
 def run(command,timeout=60):
     try:
         result=subprocess.run(command,stdin=subprocess.DEVNULL,capture_output=True,timeout=timeout,

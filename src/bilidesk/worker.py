@@ -7,7 +7,7 @@ import time
 import uuid
 
 from .library import Library,identity
-from .media import import_reports,inspect,previews,digest
+from .media import import_reports,inspect,previews,digest,check_local_file
 
 
 def emit(value):
@@ -19,11 +19,7 @@ def execute(spec,emit=emit):
     if action=='import':
         return import_reports(library,payload['source'],payload['preview'])
     if action=='check_file':
-        detail=library.detail(payload['bvid'])
-        asset=next((a for a in detail.get('assets',[]) if str(a['cid'])==str(payload['cid'])),None)
-        if not asset or not asset['path'] or not Path(asset['path']).is_file(): raise ValueError('local_file_missing')
-        if Path(asset['path']).stat().st_size!=asset['size']: raise ValueError('local_file_changed')
-        return {'path':asset['path'],'folder':bool(payload.get('folder'))}
+        return check_local_file(library,payload['bvid'],payload['cid'],payload.get('folder',False))
     if action=='synthetic_wait':
         time.sleep(30); return {'synthetic':True}
     if action not in ('metadata','download','native_probe'): raise ValueError('unknown_action')
