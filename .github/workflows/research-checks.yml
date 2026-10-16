@@ -7,16 +7,16 @@ permissions:
 jobs:
   research-tests:
     runs-on: windows-latest
-    timeout-minutes: 10
+    timeout-minutes: 15
     steps:
       - uses: actions/checkout@v4
       - uses: actions/setup-python@v5
         with:
           python-version: '3.13'
-      - name: Install research dependencies
-        run: python -m pip install -r requirements-research.lock.txt
+      - name: Install pinned desktop and research dependencies
+        run: python -m pip install -r requirements-desktop.lock.txt
       - name: Compile research scripts
-        run: python -m compileall -q experiments
+        run: python -m compileall -q experiments src scripts
       - name: Create isolated test output parent
         run: New-Item -ItemType Directory -Path .artifacts -Force | Out-Null
       - name: Prepare checksum-pinned FFmpeg for synthetic media checks
@@ -35,4 +35,18 @@ jobs:
           & $ffprobe -version | Select-Object -First 1
           "BILI_TEST_FFMPEG=$ffmpeg" | Out-File -FilePath $env:GITHUB_ENV -Append -Encoding utf8
       - name: Test synthetic contracts only
+        env:
+          QT_QPA_PLATFORM: offscreen
         run: python -m pytest -q --basetemp=.artifacts/pytest-ci --junitxml=.artifacts/tests.xml
+      - name: Check dependency consistency
+        run: python -m pip check
+      - name: Prepare redistribution notices for local CI build
+        shell: pwsh
+        run: |
+          New-Item -ItemType Directory -Path build/license-cache -Force | Out-Null
+          Copy-Item -LiteralPath packaging/licenses/GPL-3.0.txt -Destination build/license-cache/GPL-3.0.txt
+          Copy-Item -LiteralPath packaging/licenses/LGPL-3.0.txt -Destination build/license-cache/LGPL-3.0.txt
+      - name: Build portable candidate (no media or credentials)
+        run: python scripts/build_windows.py --name BiliBatchDownloader-0.1.0-ci
+      - name: Exercise frozen UI and worker without Python on PATH
+        run: python scripts/smoke_portable.py --bundle dist/BiliBatchDownloader-0.1.0-ci --output .artifacts/frozen-ci

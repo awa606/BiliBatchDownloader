@@ -1,112 +1,64 @@
-# BiliBatchDownloader
+# BiliBatchDownloader 作者作品库
 
-面向 Windows 的 B站作者作品库升级项目，目标是关注同步、作者浏览、视频与动态下载、作品预览和本地打开。
+中文 Windows 桌面应用：**本地作者 → 分类 → 作品 → 分P与实际截图 → 默认播放器**。当前 **0.1.0 VERIFY候选版**，采用浅色卡片、B站粉色点缀，参考 PixivDesk 的三级浏览和后台任务模式。
 
-**当前阶段：研究验证中，尚无新版可运行产品。** 三个视频及18张预览已通过下载/解码和用户播放/声音同步/索引验收。本轮独立页面诊断用2请求、0媒体确认当前5个模块的`module_blocked`均为null，合并后仍为null；新页面SHA已变化，旧失败原因仍不能追认。随后媒体地址元数据校验停止，4PNG基线未完成核对；没有恢复图片或实况下载。Research继续为NEEDS MORE EVIDENCE。
+本轮从仅研究探针推进到可操作作品库；按用户批准的模块方式交付，整体研究仍 **NEEDS MORE EVIDENCE**。已有功能与最终完整需求分别记录，不把固定小样本成功外推到全部B站内容。
 
-## 已完成与待完成
+## 当前能做什么
 
-- 已完成：独立工程与公开仓库、锁定研究环境、真实登录与完整关注分页、普通视频与多P元数据、固定三个视频资产的真实下载/合并/完整解码、18张实际预览、图集探针加固、脱敏证据和离线测试。
-- 待验证：下载取消/恢复、图库/实况/真实动图、独立动态视频、转发归属、作者完整作品分页。三个固定视频的播放/预览人工验收已通过。
-- 待实现：新版界面、SQLite 作品库、后台队列、内容截图、旧文件原位导入、便携 EXE。
-- 门禁：Research `NEEDS MORE EVIDENCE`；账号前提 `PASS`；U02视频单页及固定三资产实验 `PASS`；U03当前结构诊断 `COMPLETE`、有效阻止模块未观察到、基线 `NOT_CHECKED`；Design `NOT_STARTED`。
-- 工程检查：本轮538项通过、1项因Windows符号链接创建权限跳过；保留原479项覆盖，新增60项。[Windows CI](https://github.com/awa606/BiliBatchDownloader/actions/runs/38915088185)539项全部通过（24.99秒），对应实质源码0dc6551。真实FFmpeg合成测试、编译、依赖检查通过；离线检查不替代真实下载与人工验收。
+- SQLite离线作品库，按UID/BV/CID去重；本地作者分组，按作者、标题、正文、原标签搜索，分类与未下载筛选、40项分页。
+- 作品卡片、分P详情、原站信息与标签状态、最多6张带实际帧时间的内容截图；调用系统默认播放器及文件夹，缺失/变化明确提示。
+- 读取BV或视频链接后选择分P；yt-dlp **标准 `extract_info(download=True)` 流程**负责下载、格式选择与合并，应用没有覆盖 `urlopen` 或自建媒体传输。
+- 独立worker和Windows Job；串行持久化任务、暂停视频派发、取消、人工重试、重启后中断标记。核验后同卷无覆盖发布；视频下载与截图失败分开。
+- 导入本工具已有核验报告：复核视频/截图哈希，原文件原位登记，不扫描旧素材目录。
 
-首版需求与验收见[功能与验收矩阵](docs/功能与验收矩阵.md)和[维护Issue #1](https://github.com/awa606/BiliBatchDownloader/issues/1)。当前证据见[研究结果](docs/研究结果-20261016.md)，实验顺序见[研究预注册](docs/研究预注册.md)，候选比较和空决策见[研究决策记录](docs/研究决策记录.md)。
+## 验证与限制
 
-## 未来的内容管理方式
+原生固定普通视频P1一次验证 **PASS**：7次请求、一次301、37,708,058 HTTP传输字节、360p音视频合并和完整解码。此前三个视频/18张预览及用户播放验收继续保留；新原生输出尚未由用户重新播放确认。
 
-按“作者 → 内容分类 → 作品”浏览和管理新下载，分类为**图文／图片、投稿视频、动态视频、待分类**。这是已确认的产品要求，当前尚未实现界面或文件归档。
+每任务暂限 **12次请求、230秒、15秒单次网络等待、最高360p、64MiB总HTTP传输、零自动重试**。元数据与响应头也计入字节上限。达到限制或出现登录/平台限制立即停止，不扩大预算。截图未通过不会抹掉已核验的视频。
 
-- 图文、多图、GIF和实况照片归入图文／图片；实况照片的图片及配套视频成组保存。
-- 投稿视频与动态视频依据可核验的原站信息区分。不能只看扩展名、有无BV号、发现入口，或一次分页是否找到；证据不足保持待分类并允许纠正。
-- 普通投稿分享到动态后仍关联同一作品；相同BV/CID多入口不重复下载。转发者与原作者分别记录。
-- 作者身份以UID保持稳定；旧文件继续原位登记，不因新增分类自动移动或覆盖。纯文字与无独立媒体的转发记录仍保留在作者全部动态浏览中。
+尚未完成：本人关注的产品同步、完整作者索引、图库/GIF/实况照片/独立动态视频、转发归属、头像/原站封面缓存、通用旧目录预扫描、跨启动无缝续传。下载中心的取消和重启恢复已做合成检查，真实网络中断场景仍待验证。
 
-## 运行离线检查
+最新工程、包测试及CI见[0.1.0交付记录](docs/0.1.0交付记录.md)。无Python的干净Windows、完整可交互首屏≤2秒和用户产品体验仍需独立验收。固定样本下载通过不能替代这些要求。
 
-需要 Python 3.13。以下检查不会访问 B站、浏览器档案或下载媒体。
+## 启动与使用
+
+本机候选包：`dist/BiliBatchDownloader-0.1.0-verify-r5/BiliBatchDownloader.exe`。保留同目录的 `BiliDeskWorker.exe` 与 `_internal`，不要只复制一个EXE。打开同目录 `使用手册.html` 可离线阅读。
+
+本地数据库与设置位于 `%LOCALAPPDATA%/BiliBatchDownloaderDesk`，不随程序目录或公开源码分发。本机已将授权的3个视频、18张截图原位登记；公开包为空库，不包含用户媒体。
+
+联网前在设置中填写本人专用Chrome档案、下载目录及独立FFmpeg/FFprobe工具对。先在旧工具的专用Chrome完成登录，再关闭浏览器。Cookie仅在worker内存中读取，应用不保存Cookie文件。没有捆绑FFmpeg、gallery-dl或PixivUtil2到本次便携包。
+
+新下载按“作者UID/内容分类/BV/CID”组织。图文／图片、投稿视频、动态视频、待分类四类保留；来源证据不足默认待分类。手工纠正分类记录人工依据，但不移动旧文件。不能凭BV、扩展名或动态入口判断投稿属性。
+
+## 源码运行与检查
 
 ```powershell
 cd D:\sd.webui\bili_desktop
 py -3.13 -m venv .venv
-.\.venv\Scripts\python.exe -m pip install -r requirements-research.lock.txt
-New-Item -ItemType Directory -Path .artifacts -Force | Out-Null
-.\.venv\Scripts\python.exe -m pytest -q --basetemp=.artifacts/pytest-manual-01
+.\.venv\Scripts\python.exe -m pip install -r requirements-desktop.lock.txt
+$env:PYTHONPATH = "$PWD\src"
+.\.venv\Scripts\python.exe -m bilidesk.app
 ```
 
-每轮使用新的 `--basetemp` 路径，保留失败证据。首次默认系统临时目录遇到权限错误，改用本项目实验目录后通过，未修改系统权限。
-
-## 运行明确授权的账号验证
-
-**本轮一次页面结构诊断已结束，不追加B站请求。** 本地播放/HTML显示经用户确认PASS；旧纯图下载BLOCKED，实况未运行。本轮虽未观察到有效阻止模块，但媒体地址元数据校验停止，不能恢复下载。以下为工具说明，不是重跑指令。后续在线实验需登记新的输入、预算与停止条件。
-
-先在旧工具点击“打开专用 Chrome”，完成B站登录并关闭该浏览器，再使用明确指定的专用档案。不要发送 Cookie、密码或账号截图。
+离线测试不访问B站或真实Chrome档案。合成媒体测试需显式指定FFmpeg，缺失时相应用例会跳过，不能写作全通过。
 
 ```powershell
-.\.venv\Scripts\python.exe experiments/research_probe.py `
-  --profile 'D:\sd.webui\tools\bili_download\chrome_bili_profile' `
-  --followings `
-  --output .artifacts/U01-account-new-attempt.json
+$env:BILI_TEST_FFMPEG = '你的独立工具目录\ffmpeg.exe'
+.\.venv\Scripts\python.exe -m pytest -q --basetemp=.artifacts/pytest-new-run
+.\.venv\Scripts\python.exe scripts/benchmark_library.py --output .artifacts/benchmark-new-run
 ```
 
-也支持用 `--cookie-file` 指定本人提供的 Netscape Cookie 文件，不能与 `--profile` 同用。凭据仅进入进程内存，输出只保留业务码、计数和响应哈希。证据文件只允许写入 `.artifacts`，已有结果不能覆盖。
+每次使用新的输出目录，保留旧失败证据。打包使用 `scripts/build_windows.py --name BiliBatchDownloader-0.1.0-新标识`；需先准备 `build/license-cache` 中完整GPLv3/LGPLv3文本，构建绝不覆盖旧目录。详见[第三方边界](docs/第三方依赖.md)。
 
-默认实验先验证真实登录，再取关注前两页；总数超过250时额外核验第5/6页。最多5次请求，单次网络等待15秒，无自动重试。有限分页结果必须标记 `PARTIAL`。边界通过后，可用预注册的 `--full-pages N` 做最多N页完整性核验；本次限定8页，结果与平台总量一致，重复为0。返回登录失效、平台限制或结构异常时停止，保留失败，再登记有明确假设的新实验。
+## 项目维护
 
-视频、图集和动态探针位于 `experiments/`，不是应用下载入口。视频元数据探针只检查前两P的播放信息，并读取整组CID；禁止据此声称全部分P下载通过。原上游图集404失败保留；用户新样本读到4PNG及9JPG+9配套MP4，但真实媒体未验证，实况照片也不等同GIF。
+- [模块研究与设计评审](docs/视频作品库模块评审.md)、[完整功能与验收矩阵](docs/功能与验收矩阵.md)、[Issue #1](https://github.com/awa606/BiliBatchDownloader/issues/1)。
+- [历史研究结果](docs/研究结果-20261016.md)、[历史研究工具说明](docs/历史研究工具说明-20261016.md)、[预注册](docs/研究预注册.md)。旧失败不删除，图片/实况本轮没有恢复请求。
+- 自有源码 [MIT](LICENSE)。公开Git只含源码、合成测试、文档和脱敏结论；媒体、截图、数据库、浏览器档案、凭据、环境、日志和便携包均被忽略。
+- 按模块研究和设计通过后编码，完成工程检查先进入VERIFY。整体研究和最终人工验收不随局部成功自动通过。
 
-图集下载探针要求明确提供的FFmpeg旁存在FFprobe，并提供固定元数据`--baseline-report`；缺失时在联网前停止。本机独立Gyan9.0.2工具对及人工播放/预览已通过；下载探针的保守停止条件未修改。下一步先补充媒体URL形态的脱敏诊断，定位来源/扩展名校验失败的具体类别，不能直接扩域名白名单或恢复下载。作者索引探针最多2页，仅完成离线检查；其COMPLETE只描述服务器本次可见快照，不证明所有历史或隐藏内容完整。
+## 参考方案
 
-## 单页验证工具
-
-独立的`experiments/video_page_probe.py`只验证固定BV13x41117TL：默认最多2请求、0页面跳转、0重试、60秒工作进程时限。显式添加`--allow-canonical-redirect`才允许实际301中唯一Location精确匹配同BV、同查询、仅补尾斜杠目标，最多3请求；第二次跳转立即停止。完整绝对地址或根相对路径均需严格核验，不接受其他规范化。下载探针共用该选项，但仍受36次总请求预算约束，页面与CDN跳转分别计数。
-
-必须先独立确认正常浏览器访问并传入`--browser-confirmed`；这个参数是操作者声明，不会自行证明前提。`--output`必须是`.artifacts`内的新文件。报告只保存跳转判定和白名单结果，原HTML、原Location、陌生地址/查询、Cookie和原始异常不落盘。最终HTTP200仍需BV/标题身份检查通过；不代表真实下载通过。
-
-单页报告schema3保留`response_diagnostics`的原始字节层与`page_response_sha256`的原始完整响应语义，新增`content_decoding`及成功后的`decoded_response_diagnostics`。共享元数据层仅支持缺失/单identity和单gzip；原始与解码后各3MiB，拒绝未知/多重编码、损坏、截断、拼接成员及任何尾随数据。解码后执行原风险/API/身份检查；失败不保存部分解码内容，超原始上限只记限量前缀。媒体分支不解压，不执行脚本或放宽身份规则；验证相关词出现不能单独判定验证码。
-
-## 图文页面结构诊断工具
-
-`experiments/gallery_page_probe.py`只诊断固定纯图样本1249456774436618276，最多登录检查1次＋源页1次，零重试、零跳转、零媒体；worker60秒，网络等待15秒，间隔至少1秒，原始/解码后各3MiB。没有媒体放行选项，不依赖FFmpeg，不刷新浏览器或预取页面。
-
-它通过固定gallery-dl的实际入口观察原始modules，再观察合并后的Directory；另对同一初始化数据切片保留重复JSON字段的类型与位置，区分模块、其他字段、字符串和切片之外的标记。诊断完成、有效阻止模块、基线匹配各自报告；响应哈希改变时不追认历史失败原因。初始化数据外的标记不被擅自称为脚本模板。
-
-以下仅是已登记实验的调用格式；每个登记最多执行一次，不能反复运行直到成功：
-
-```powershell
-.\.venv\Scripts\python.exe experiments/gallery_page_probe.py `
-  --profile 'D:\sd.webui\tools\bili_download\chrome_bili_profile' `
-  --baseline-report .artifacts/U03-gallery-user-images-20261016-attempt1.json `
-  --prior-failure-report .artifacts/gallery-download-u03-images-20261016-attempt1/report.json `
-  --output .artifacts/U03-gallery-page-NEW-ATTEMPT.json
-```
-
-两份历史报告必须匹配固定样本与旧失败契约，并在父子进程间核对SHA。输出独占创建，不覆盖旧证据；超时请求数无法回收时写未知，不伪装为0。报告和日志不保留正文、阻止提示原文、Cookie或签名地址。诊断结果不会修改下载探针的停止规则。
-
-## 本地预览研究工具
-
-`experiments/local_preview_probe.py`只处理已核验下载报告中的三个固定BV/CID文件，不联网或重新下载。每项最多6张PNG，长边不超过640像素、不放大；记录实际PTS和计划时间，完全相同PNG仅合并展示，保留所有采样。源视频和原下载报告保持不变；单项私有Windows Job限60秒，截图错误、取消与下载结果分开。
-
-```powershell
-.\.venv\Scripts\python.exe experiments/local_preview_probe.py `
-  --source-report .artifacts/video-download-u02-gzip-20261016-attempt1/report.json `
-  --output .artifacts/local-preview-NEW-NAME `
-  --ffmpeg 'D:\sd.webui\dist\BiliBatchDownloader\_internal\ffmpeg\bin\ffmpeg.exe'
-```
-
-输入报告及媒体只在本机，不随仓库分发；输出目录必须全新，含`report.json`与`index.html`。本轮实际输出为`.artifacts/local-preview-u04-20261016-attempt1/`；`.artifacts`是`bili_desktop`内的子目录。预览生成与夸克播放/HTML显示分别记录；本轮后两项由用户实际检查确认PASS，自动化窗口绑定/本地协议限制的失败记录仍保留。
-
-合成媒体测试可设置`BILI_TEST_FFMPEG`为明确选定的FFmpeg路径；不设置时相应用例跳过。Windows CI固定下载并校验Gyan9.0.2，实际生成合成PNG/JPG/视频测试，不读取私人媒体、浏览器档案或访问B站。
-
-## 公开仓库边界
-
-公开内容仅包含自有研究代码、测试、文档和公开上游样本链接。`.venv`、`.artifacts`、凭据、浏览器档案、数据库、下载媒体及旧软件包不进入 Git。CI 只运行合成离线测试，不使用账号秘密或真实站点。
-
-自有代码采用 [MIT](LICENSE)。第三方依赖保留各自许可；当前没有分发第三方二进制、媒体或新版 EXE。许可调查见[第三方依赖](docs/第三方依赖.md)。
-
-## 参考资料
-
-- [Douzy：产品流程参考](https://github.com/jiji262/douyin-downloader)
-- [yt-dlp：视频候选](https://github.com/yt-dlp/yt-dlp/releases/tag/2026.08.19)
-- [gallery-dl：图文候选](https://github.com/mikf/gallery-dl/releases/tag/v1.32.16)
+[yt-dlp官方嵌入](https://github.com/yt-dlp/yt-dlp#embedding-yt-dlp)、[gallery-dl B站提取器](https://github.com/mikf/gallery-dl/blob/v1.32.16/gallery_dl/extractor/bilibili.py)、[PixivUtil2](https://github.com/Nandaka/PixivUtil2)、[Qt进程模型](https://doc.qt.io/qtforpython-6/PySide6/QtCore/QProcess.html)。Douzy仅为用户指定的体验参考，未确认可复用桌面源码；不把其他抖音CLI项目标作Douzy。
