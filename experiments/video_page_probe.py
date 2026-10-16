@@ -4,6 +4,7 @@ from __future__ import annotations
 import argparse
 import contextlib
 from datetime import datetime, timezone
+from email.message import Message
 import hashlib
 import importlib.metadata
 import importlib.util
@@ -24,10 +25,96 @@ REQUEST_LIMIT = 2
 WORKER_TIMEOUT = 60
 
 
+def header_values(headers, name):
+    if hasattr(headers, "get_all"):
+        return headers.get_all(name, [])
+    return [value for key, value in headers.items() if key.lower() == name.lower()]
+
+
+def charset_category(value):
+    if value is None:
+        return "MISSING"
+    return {"utf-8": "UTF8", "utf8": "UTF8", "utf-16": "UTF16", "utf-16le": "UTF16LE",
+            "utf-16be": "UTF16BE", "utf-32": "UTF32", "gbk": "GBK", "gb2312": "GB2312",
+            "gb18030": "GB18030", "iso-8859-1": "LATIN1", "us-ascii": "ASCII"}.get(value.lower(), "OTHER")
+
+
+def response_diagnostics(body, headers):
+    """Only fixed enums/counts/booleans/hashes; never return header or HTML text.
+
+    Standard urllib has removed transfer framing, but no content decompression or
+    charset conversion is performed here. Observations never change page_identity.
+    """
+    content_types = header_values(headers, "Content-Type")
+    encodings = header_values(headers, "Content-Encoding")
+    content_type, charset = "MISSING", "MISSING"
+    if len(content_types) > 1:
+        content_type = charset = "MULTIPLE_FIELDS"
+    elif content_types:
+        value = content_types[0]
+        content_type = {"text/html": "HTML", "application/xhtml+xml": "XHTML", "application/json": "JSON",
+                        "text/plain": "TEXT", "application/octet-stream": "BINARY"}.get(
+                            value.split(";", 1)[0].strip().lower(), "OTHER")
+        message = Message()
+        message["Content-Type"] = value
+        # Multiple charset parameters are ambiguous even if the first looks familiar.
+        params = [v for k, v in message.get_params()[1:] if k.lower() == "charset"]
+        charset = ("MULTIPLE_PARAMETERS" if len(params) > 1 else "MISSING" if not params else
+                   charset_category(message.get_content_charset()) if message.get_content_charset() is not None else "OTHER")
+    encoding = "MISSING"
+    if len(encodings) > 1:
+        encoding = "MULTIPLE_FIELDS"
+    elif encodings:
+        value = encodings[0].strip().lower()
+        encoding = "MULTIPLE_CODINGS" if "," in value else {
+            "identity": "IDENTITY", "gzip": "GZIP", "deflate": "DEFLATE", "br": "BR", "zstd": "ZSTD"}.get(value, "OTHER")
+    result = {"schema_version": 1, "analysis_layer": "RAW_DECHUNKED_NO_CONTENT_DECOMPRESSION",
+              "content_type_field_count": len(content_types), "content_type": content_type,
+              "charset": charset, "content_encoding_field_count": len(encodings), "content_encoding": encoding,
+              "observed_bytes": len(body), "observed_sha256": hashlib.sha256(body).hexdigest(),
+              "body_limit_exceeded": len(body) > download.MAX_METADATA_BYTES,
+              "structure_analysis": "NOT_RUN_OVER_LIMIT"}
+    if result["body_limit_exceeded"]:
+        return result  # These bytes are a capped prefix, not the complete response size/hash.
+    try:
+        body.decode("utf-8", errors="strict")
+        utf8_valid = True
+    except UnicodeDecodeError:
+        utf8_valid = False
+    bom = "NONE"
+    for signature, name in ((b"\xff\xfe\x00\x00", "UTF32LE"), (b"\x00\x00\xfe\xff", "UTF32BE"),
+                            (b"\xef\xbb\xbf", "UTF8"), (b"\xff\xfe", "UTF16LE"), (b"\xfe\xff", "UTF16BE")):
+        if body.startswith(signature):
+            bom = name
+            break
+    lower = body.lower()
+    result.update(structure_analysis="OBSERVED_RAW_BYTES", utf8_strict_valid=utf8_valid, bom=bom,
+                  gzip_magic=body.startswith(b"\x1f\x8b\x08"), nul_bytes_present=b"\x00" in body,
+                  html_tag=bool(re.search(rb"<html(?:\s|>)", lower)),
+                  head_tag=bool(re.search(rb"<head(?:\s|>)", lower)),
+                  body_tag=bool(re.search(rb"<body(?:\s|>)", lower)),
+                  title_tag=bool(re.search(rb"<title(?:\s|>)", lower)),
+                  script_tag_count=len(re.findall(rb"<script(?:\s|>)", lower)),
+                  json_like_prefix=body.lstrip().startswith((b"{", b"[")),
+                  expected_bvid_literal=FIXED_BVID.encode("ascii") in body,
+                  initial_state_token=b"__INITIAL_STATE__" in body,
+                  initial_state_assignment=bool(re.search(rb"window\.__INITIAL_STATE__\s*=\s*", body)),
+                  initial_data_token=b"__INITIAL_DATA__" in body,
+                  playinfo_assignment=bool(re.search(rb"window\.__playinfo__\s*=\s*", body)),
+                  riskdata_marker=b"window._riskdata_" in body or b"window.__riskdata__" in body,
+                  verification_word_marker=any(word in lower for word in (
+                      b"captcha", b"geetest", "安全验证".encode(), "人机验证".encode())))
+    return result
+
+
 class PageTransport(download.BoundedTransport):
     def __init__(self, jar, initial_requests=0, *, allow_canonical_redirect=False):
         super().__init__(jar, initial_requests, allow_canonical_redirect=allow_canonical_redirect,
                          request_limit=REQUEST_LIMIT + int(allow_canonical_redirect))
+        self.response_diagnostics = None
+
+    def observe_metadata(self, body, headers):
+        self.response_diagnostics = response_diagnostics(body, headers)
 
     def allow_media(self, urls):
         raise ProbeStop("page_probe_forbids_media")
@@ -101,6 +188,8 @@ def run_worker(profile, *, browser_confirmed, allow_canonical_redirect=False):
         if transport:
             report.update(page_redirect_count=transport.page_redirect_count, page_redirect_events=transport.page_redirect_events,
                           media_redirect_count=transport.redirect_count)
+            if transport.response_diagnostics is not None:
+                report["response_diagnostics"] = transport.response_diagnostics
     return report
 
 
@@ -154,7 +243,7 @@ def main(argv=None):
         output = common.open_evidence(args.output)
     except (ValueError, OSError):
         parser.error("Evidence must be a new writable file inside .artifacts; no credentials read or requests sent")
-    report = {"schema_version": 1, "experiment": "U02_FIXED_PAGE_AFTER_HEADER_REPAIR", "bvid": FIXED_BVID,
+    report = {"schema_version": 2, "experiment": "U02_FIXED_PAGE_RESPONSE_DIAGNOSTIC", "bvid": FIXED_BVID,
               "timestamp_utc": datetime.now(timezone.utc).isoformat(), "research_gate": "NEEDS_MORE_EVIDENCE",
               "request_limit": REQUEST_LIMIT + int(args.allow_canonical_redirect), "worker_timeout_seconds": WORKER_TIMEOUT,
               "allow_canonical_redirect": args.allow_canonical_redirect,

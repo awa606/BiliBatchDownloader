@@ -208,6 +208,9 @@ class BoundedTransport:
             raise ProbeStop("media_origin_not_allowed")
         self.media_urls = set(urls)
 
+    def observe_metadata(self, body, headers):
+        """Optional bounded observer; the download probe records no response content."""
+
     def request(self, request, *, default_headers=None):
         from yt_dlp.networking import Request, Response
         from yt_dlp.utils.networking import HTTPHeaderDict
@@ -278,6 +281,7 @@ class BoundedTransport:
                 body = response.read(MAX_METADATA_BYTES + 1)
             finally:
                 response.close()
+            self.observe_metadata(body, response.headers)
             if len(body) > MAX_METADATA_BYTES:
                 raise ProbeStop("metadata_size_limit")
             if b"window._riskdata_" in body or b"window.__riskdata__" in body:
