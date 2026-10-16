@@ -10,7 +10,7 @@
 - 待验证：下载取消/恢复、图库/实况/真实动图、独立动态视频、转发归属、作者完整作品分页。三个固定视频的播放/预览人工验收已通过。
 - 待实现：新版界面、SQLite 作品库、后台队列、内容截图、旧文件原位导入、便携 EXE。
 - 门禁：Research `NEEDS MORE EVIDENCE`；账号前提 `PASS`；最新单页及固定三资产实验 `PASS`；Design `NOT_STARTED`。
-- 工程检查：本轮最终478项通过、1项因Windows符号链接创建权限跳过；原374项覆盖保留，新增105项。包含真实FFmpeg合成媒体；编译和依赖检查通过。首批源码393cd72的[Windows CI](https://github.com/awa606/BiliBatchDownloader/actions/runs/38909818828)464项通过；最终结构诊断版本CI待核验，前批CI不充作后续版本结果。离线工程检查、真实下载与人工验收分别记录。
+- 工程检查：本轮最终478项通过、1项因Windows符号链接创建权限跳过；原374项覆盖保留，新增105项。包含真实FFmpeg合成媒体；编译和依赖检查通过。[最终Windows CI](https://github.com/awa606/BiliBatchDownloader/actions/runs/38911244490)479项通过（无跳过，11.37秒），对应实质源码`57325c442a758443df5fbde22e642e193540643f`。离线工程检查、真实下载与人工验收分别记录。
 
 首版需求与验收见[功能与验收矩阵](docs/功能与验收矩阵.md)和[维护Issue #1](https://github.com/awa606/BiliBatchDownloader/issues/1)。当前证据见[研究结果](docs/研究结果-20261016.md)，实验顺序见[研究预注册](docs/研究预注册.md)，候选比较和空决策见[研究决策记录](docs/研究决策记录.md)。
 
