@@ -277,7 +277,7 @@ def test_discovery_uses_only_bounded_source_request(monkeypatch):
             pass
         def __iter__(self):
             self.request(probe.source_url(LIVE))
-            yield (2, "", {"user_id": int(probe.AUTHOR_UID), "count": 9})
+            yield (2, "", {"user_id": int(probe.AUTHOR_UID), "count": 9, "detail": {"modules": {}}})
             for row in assets(LIVE):
                 yield (3, row["url"], {"num": row["sequence"], "suffix": "l" if row["pair_role"] == "live_video" else ""})
     monkeypatch.setattr(extractor, "find", lambda _: BilibiliArticleExtractor())
@@ -416,8 +416,7 @@ def test_real_upstream_extractor_consumes_decoded_page_and_matches_baseline(dyna
 
 
 @pytest.mark.parametrize("marker,reason", [(b"window._riskdata_", "verification_page_detected"),
-                                          (b"window.__riskdata__", "verification_page_detected"),
-                                          (b'"module_blocked"', "blocked_gallery_module")])
+                                          (b"window.__riskdata__", "verification_page_detected")])
 @pytest.mark.parametrize("compressed", [False, True])
 def test_risk_and_blocked_pages_stop_before_gallery_or_media(marker, reason, compressed, monkeypatch):
     raw = gzip.compress(marker, mtime=0) if compressed else marker
@@ -434,6 +433,102 @@ def test_structural_blocked_module_cannot_hide_behind_json_unicode_escape(monkey
     with pytest.raises(probe.ProbeStop, match="blocked_gallery_module"):
         probe.discover_assets(STILL, instance, baseline())
     assert len(calls) == 1 and instance.media_requests == 0
+    assert instance.blocked_diagnostic == {"source": "DIRECTORY_MODULES", "raw_marker_present": False,
+        "structure_status": "OBSERVED", "key_present": True, "value_type": "OBJECT", "truthy": True,
+        "detection": "STRUCTURED_MODULE"}
+
+
+def test_script_marker_without_structured_key_stays_unresolved_and_stops(monkeypatch):
+    page = synthetic_page() + b'<script>const fieldNames=["module_blocked"];</script>'
+    instance, calls = transport(monkeypatch, [Reply(page)])
+    with pytest.raises(probe.ProbeStop, match="module_blocked_marker_unresolved"):
+        probe.discover_assets(STILL, instance, baseline())
+    assert len(calls) == 1 and instance.media_requests == 0 and not instance.allowed_media
+    assert instance.blocked_diagnostic == {"source": "DIRECTORY_MODULES", "raw_marker_present": True,
+        "structure_status": "OBSERVED", "key_present": False, "value_type": "MISSING", "truthy": False,
+        "detection": "RAW_MARKER_OR_EMPTY_MODULE_UNRESOLVED"}
+
+
+@pytest.mark.parametrize("value,kind", [(None, "NULL"), (False, "BOOLEAN"), ({}, "OBJECT")], ids=["null", "false", "empty-object"])
+@pytest.mark.parametrize("escaped_key", [False, True], ids=["literal-key", "escaped-key"])
+def test_empty_module_is_classified_without_unlocking_media(value, kind, escaped_key, monkeypatch):
+    page = synthetic_page(blocked=True).replace(json.dumps({"hint_message": PRIVATE}).encode(), json.dumps(value).encode())
+    if escaped_key:
+        page = page.replace(b'"module_blocked"', b'"module_\\u0062locked"')
+    instance, calls = transport(monkeypatch, [Reply(page)])
+    with pytest.raises(probe.ProbeStop, match="module_blocked_marker_unresolved"):
+        probe.discover_assets(STILL, instance, baseline())
+    assert len(calls) == 1 and instance.media_requests == 0 and not instance.allowed_media
+    assert instance.blocked_diagnostic == {"source": "DIRECTORY_MODULES", "raw_marker_present": not escaped_key,
+        "structure_status": "OBSERVED", "key_present": True, "value_type": kind, "truthy": False,
+        "detection": "RAW_MARKER_OR_EMPTY_MODULE_UNRESOLVED"}
+
+
+def test_nonempty_structured_module_is_distinct_from_raw_marker_only(monkeypatch):
+    instance, calls = transport(monkeypatch, [Reply(synthetic_page(blocked=True))])
+    with pytest.raises(probe.ProbeStop, match="blocked_gallery_module"):
+        probe.discover_assets(STILL, instance, baseline())
+    assert len(calls) == 1 and instance.media_requests == 0 and not instance.allowed_media
+    assert instance.blocked_diagnostic["detection"] == "STRUCTURED_MODULE"
+    assert instance.blocked_diagnostic["truthy"] is True
+    assert PRIVATE not in json.dumps(instance.blocked_diagnostic)
+
+
+@pytest.mark.parametrize("page,raw_marker", [(b'window.__INITIAL_STATE__={invalid: "module_blocked"};', True),
+                                            (b'window.__INITIAL_STATE__={invalid};', False)], ids=["with-marker", "without-marker"])
+def test_invalid_upstream_json_retains_unobserved_structure(page, raw_marker, monkeypatch):
+    from gallery_dl.exception import AbortExtraction
+    instance, calls = transport(monkeypatch, [Reply(page)])
+    with pytest.raises(AbortExtraction):
+        probe.discover_assets(STILL, instance, baseline())
+    assert len(calls) == 1 and instance.media_requests == 0 and not instance.allowed_media
+    assert instance.blocked_diagnostic == {"source": "DIRECTORY_MODULES", "raw_marker_present": raw_marker,
+        "structure_status": "NOT_OBSERVED", "key_present": None, "value_type": "NOT_OBSERVED",
+        "truthy": None, "detection": "NOT_OBSERVED"}
+
+
+def test_flattened_duplicate_empty_value_is_unresolved_not_a_clean_page(monkeypatch):
+    page = synthetic_page(blocked=True)
+    # The pinned upstream overwrites an earlier module while flattening. Keep
+    # this limitation explicit: the raw marker still prevents all downloads.
+    page = page.replace(b']}};', b', {"module_type":"MODULE_BLOCKED", "module_blocked":null}]}};')
+    instance, calls = transport(monkeypatch, [Reply(page)])
+    with pytest.raises(probe.ProbeStop, match="module_blocked_marker_unresolved"):
+        probe.discover_assets(STILL, instance, baseline())
+    assert len(calls) == 1 and instance.media_requests == 0
+    assert instance.blocked_diagnostic["source"] == "DIRECTORY_MODULES"
+    assert instance.blocked_diagnostic["value_type"] == "NULL" and instance.blocked_diagnostic["truthy"] is False
+
+
+@pytest.mark.parametrize("invalid", [None, [], PRIVATE])
+def test_invalid_directory_modules_fail_closed_without_dumping_content(invalid, monkeypatch):
+    instance, _ = transport(monkeypatch, [])
+    with pytest.raises(probe.ProbeStop, match="gallery_directory_modules_invalid"):
+        instance.observe_directory_modules({"detail": {"modules": invalid}})
+    assert instance.blocked_diagnostic["structure_status"] == "INVALID"
+    assert PRIVATE not in json.dumps(instance.blocked_diagnostic)
+
+
+@pytest.mark.parametrize("case", ["script-token", "invalid-json", "blocked-object"])
+def test_worker_persists_only_typed_blocked_diagnostics_without_media(case, monkeypatch, tmp_path):
+    page = (synthetic_page() + b'<script>const fields=["module_blocked"];</script>' if case == "script-token"
+            else b'window.__INITIAL_STATE__={invalid:"module_blocked"};' if case == "invalid-json"
+            else synthetic_page(blocked=True))
+    instance, calls = transport(monkeypatch, [Reply(page)])
+    monkeypatch.setattr(probe, "check_workdir", lambda path, create: path)
+    monkeypatch.setattr(probe, "check_ffmpeg", lambda path: (path, path))
+    monkeypatch.setattr(probe, "load_bili_cookies", lambda *a: (http.cookiejar.CookieJar(), {}))
+    monkeypatch.setattr(probe, "run_account", lambda get: {"account": "PASS"})
+    monkeypatch.setattr(probe, "Transport", lambda *a, **k: instance)
+    monkeypatch.setattr(instance, "allow_assets", lambda *a: pytest.fail("Media allowed after blocked diagnostic"))
+    path = write_baseline(tmp_path)
+    result = probe.run_worker(PRIVATE, STILL, tmp_path, Path("ffmpeg.exe"), path, hashlib.sha256(path.read_bytes()).hexdigest())
+    assert result["download"] == "BLOCKED" and result["media_requests"] == 0 and result["assets"] == []
+    assert len(calls) == 1 and result["source_blocked_diagnostic"] == instance.blocked_diagnostic
+    assert result["source_blocked_diagnostic"]["raw_marker_present"] is True
+    assert PRIVATE not in json.dumps(result) and "hint_message" not in json.dumps(result)
+    if case == "invalid-json":
+        assert result["source_blocked_diagnostic"]["structure_status"] == "NOT_OBSERVED"
 
 
 @pytest.mark.parametrize("raw,headers,reason", [

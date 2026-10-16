@@ -202,6 +202,9 @@ class Transport:
         self.page_requests, self.media_requests, self.total_bytes = 0, 0, 0
         self.page_sha256, self.allowed_media = None, set()
         self.page_decoding = None
+        self.blocked_diagnostic = {"source": "DIRECTORY_MODULES", "raw_marker_present": None,
+                                   "structure_status": "NOT_OBSERVED", "key_present": None,
+                                   "value_type": "NOT_OBSERVED", "truthy": None, "detection": "NOT_OBSERVED"}
         self.request_limit = 2 + SAMPLES[dynamic_id]["images"] * (2 if SAMPLES[dynamic_id]["live"] else 1)
         self.last_request_at = last_request_at if last_request_at is not None else time.monotonic() if account_requests else None
 
@@ -265,11 +268,35 @@ class Transport:
                                   "raw_complete": raw_complete,
                                   "raw_sha256" if raw_complete else "raw_prefix_sha256": raw_digest}
             raise ProbeStop(exc.reason, exc.evidence) from None
+        self.blocked_diagnostic["raw_marker_present"] = b'"module_blocked"' in body
         if b"window._riskdata_" in body or b"window.__riskdata__" in body:
             raise ProbeStop("verification_page_detected")
-        if b'"module_blocked"' in body:
-            raise ProbeStop("blocked_gallery_module")
         return SimpleNamespace(text=body.decode("utf-8", errors="replace"))
+
+    def observe_directory_modules(self, metadata):
+        """Record only typed facts from upstream's flattened Directory modules.
+
+        This does not claim to recover every original module before flattening;
+        a raw marker or even an empty structured key remains a stop condition.
+        """
+        detail = metadata.get("detail")
+        modules = detail.get("modules") if isinstance(detail, dict) else None
+        if not isinstance(modules, dict):
+            self.blocked_diagnostic.update(structure_status="INVALID", detection="STRUCTURE_INVALID")
+            raise ProbeStop("gallery_directory_modules_invalid")
+        present = "module_blocked" in modules
+        value = modules.get("module_blocked")
+        kind = ("MISSING" if not present else "NULL" if value is None else "BOOLEAN" if isinstance(value, bool)
+                else "OBJECT" if isinstance(value, dict) else "ARRAY" if isinstance(value, list)
+                else "STRING" if isinstance(value, str) else "NUMBER" if isinstance(value, (int, float)) else "OTHER")
+        self.blocked_diagnostic.update(structure_status="OBSERVED", key_present=present,
+                                       value_type=kind, truthy=bool(value), detection="NONE")
+        if present and value:
+            self.blocked_diagnostic["detection"] = "STRUCTURED_MODULE"
+            raise ProbeStop("blocked_gallery_module")
+        if present or self.blocked_diagnostic["raw_marker_present"]:
+            self.blocked_diagnostic["detection"] = "RAW_MARKER_OR_EMPTY_MODULE_UNRESOLVED"
+            raise ProbeStop("module_blocked_marker_unresolved")
 
     def allow_assets(self, assets):
         if len(assets) > MAX_ASSETS:
@@ -338,9 +365,7 @@ def discover_assets(dynamic_id, transport, baseline):
                 raise ProbeStop("multiple_directory_messages")
             identity = author_identity(message[2].get("user_id"))
             declared_images = message[2].get("count")
-            modules = message[2].get("detail", {}).get("modules", {})
-            if isinstance(modules, dict) and "module_blocked" in modules:
-                raise ProbeStop("blocked_gallery_module")
+            transport.observe_directory_modules(message[2])
         elif message[0] == 3:
             assets.append(asset_descriptor(dynamic_id, message[1], message[2]))
             if len(assets) > MAX_ASSETS:
@@ -466,6 +491,7 @@ def run_worker(profile, dynamic_id, workdir, ffmpeg, baseline_report, baseline_s
         if transport:
             report.update(source_response_sha256=transport.page_sha256, source_requests=transport.page_requests,
                           source_metadata_decoding=transport.page_decoding, request_limit=transport.request_limit,
+                          source_blocked_diagnostic=transport.blocked_diagnostic,
                           media_requests=transport.media_requests, total_media_bytes=transport.total_bytes)
     return report
 
