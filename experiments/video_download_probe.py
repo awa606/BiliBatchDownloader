@@ -6,6 +6,7 @@ import contextlib
 import ctypes
 from ctypes import wintypes
 from datetime import datetime, timezone
+from email.message import Message
 import hashlib
 import importlib.metadata
 import importlib.util
@@ -20,6 +21,7 @@ import sys
 import urllib.error
 import urllib.parse
 import urllib.request
+import zlib
 
 _spec = importlib.util.spec_from_file_location("_download_video_probe", Path(__file__).with_name("video_probe.py"))
 video = importlib.util.module_from_spec(_spec)
@@ -34,6 +36,44 @@ SAMPLES = (("BV13x41117TL", 1), ("BV1bK411W797", 1), ("BV1bK411W797", 2))
 API_PATHS = {"/x/web-interface/nav", "/x/player/pagelist", "/x/player/wbi/playurl",
              "/x/player/wbi/v2", "/x/web-interface/wbi/view/detail", "/x/web-interface/view"}
 CDN_SUFFIXES = ("bilivideo.com", "bilivideo.cn", "hdslb.com")
+
+
+def decode_metadata(body, headers):
+    """Decode one bounded gzip member; no guessing, trailing data or unbounded flush."""
+    if len(body) > MAX_METADATA_BYTES:
+        raise ProbeStop("metadata_size_limit")
+    values = (headers.get_all("Content-Encoding", []) if hasattr(headers, "get_all") else
+              [value for key, value in headers.items() if key.lower() == "content-encoding"])
+    encoding = "MISSING"
+    if values:
+        value = values[0].strip(" \t").lower() if len(values) == 1 and isinstance(values[0], str) else None
+        encoding = {"identity": "IDENTITY", "gzip": "GZIP"}.get(value, "UNSUPPORTED")
+        if encoding == "UNSUPPORTED":
+            raise ProbeStop("content_encoding_unsupported", {"encoding": encoding})
+    decoded = body
+    if encoding == "GZIP":
+        try:
+            decoder = zlib.decompressobj(31)
+            decoded = decoder.decompress(body, MAX_METADATA_BYTES + 1)
+        except zlib.error:
+            raise ProbeStop("metadata_gzip_invalid", {"encoding": encoding}) from None
+        if len(decoded) > MAX_METADATA_BYTES:
+            raise ProbeStop("metadata_decoded_size_limit", {"encoding": encoding})
+        if not decoder.eof or decoder.unconsumed_tail:
+            raise ProbeStop("metadata_gzip_incomplete", {"encoding": encoding})
+        if decoder.unused_data:
+            raise ProbeStop("metadata_gzip_trailing_data", {"encoding": encoding})
+    copied = Message()
+    for key, value in headers.items():
+        if encoding != "GZIP" or key.lower() not in {"content-encoding", "content-length", "transfer-encoding"}:
+            copied.add_header(key, value)
+    if encoding == "GZIP":
+        copied["Content-Length"] = str(len(decoded))
+    evidence = {"status": "DECODED" if encoding == "GZIP" else "PASS_THROUGH", "encoding": encoding,
+                "raw_bytes": len(body), "decoded_bytes": len(decoded),
+                "raw_sha256": hashlib.sha256(body).hexdigest(),
+                "decoded_sha256": hashlib.sha256(decoded).hexdigest()}
+    return decoded, copied, evidence
 
 
 def merger_postprocessor_args():
@@ -211,6 +251,9 @@ class BoundedTransport:
     def observe_metadata(self, body, headers):
         """Optional bounded observer; the download probe records no response content."""
 
+    def observe_content_decoding(self, body, headers, evidence):
+        """Optional validated content observer; failed decoding passes no content."""
+
     def request(self, request, *, default_headers=None):
         from yt_dlp.networking import Request, Response
         from yt_dlp.utils.networking import HTTPHeaderDict
@@ -282,8 +325,12 @@ class BoundedTransport:
             finally:
                 response.close()
             self.observe_metadata(body, response.headers)
-            if len(body) > MAX_METADATA_BYTES:
-                raise ProbeStop("metadata_size_limit")
+            try:
+                body, decoded_headers, decoding = decode_metadata(body, response.headers)
+            except ProbeStop as exc:
+                self.observe_content_decoding(None, None, {"status": "FAILED", "reason": exc.reason, **exc.evidence})
+                raise
+            self.observe_content_decoding(body, decoded_headers, decoding)
             if b"window._riskdata_" in body or b"window.__riskdata__" in body:
                 raise ProbeStop("platform_verification_page")
             if parsed.netloc == "api.bilibili.com":
@@ -294,7 +341,7 @@ class BoundedTransport:
                 if not isinstance(payload, dict) or type(payload.get("code")) is not int or payload["code"] != 0:
                     code = payload.get("code") if isinstance(payload, dict) and type(payload.get("code")) is int else None
                     raise ProbeStop("api_stop", {"api_code": code})
-            return Response(io.BytesIO(body), url, response.headers, response.status)
+            return Response(io.BytesIO(body), url, decoded_headers, response.status)
         raise ProbeStop("media_redirect_not_allowed")
 
 

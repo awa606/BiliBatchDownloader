@@ -39,11 +39,11 @@ def charset_category(value):
             "gb18030": "GB18030", "iso-8859-1": "LATIN1", "us-ascii": "ASCII"}.get(value.lower(), "OTHER")
 
 
-def response_diagnostics(body, headers):
+def response_diagnostics(body, headers, *, decoded=False):
     """Only fixed enums/counts/booleans/hashes; never return header or HTML text.
 
-    Standard urllib has removed transfer framing, but no content decompression or
-    charset conversion is performed here. Observations never change page_identity.
+    The caller identifies the byte layer. This observer never decompresses or
+    converts text, and observations never change page_identity.
     """
     content_types = header_values(headers, "Content-Type")
     encodings = header_values(headers, "Content-Encoding")
@@ -68,7 +68,7 @@ def response_diagnostics(body, headers):
         value = encodings[0].strip().lower()
         encoding = "MULTIPLE_CODINGS" if "," in value else {
             "identity": "IDENTITY", "gzip": "GZIP", "deflate": "DEFLATE", "br": "BR", "zstd": "ZSTD"}.get(value, "OTHER")
-    result = {"schema_version": 1, "analysis_layer": "RAW_DECHUNKED_NO_CONTENT_DECOMPRESSION",
+    result = {"schema_version": 1, "analysis_layer": "CONTENT_DECODED" if decoded else "RAW_DECHUNKED_NO_CONTENT_DECOMPRESSION",
               "content_type_field_count": len(content_types), "content_type": content_type,
               "charset": charset, "content_encoding_field_count": len(encodings), "content_encoding": encoding,
               "observed_bytes": len(body), "observed_sha256": hashlib.sha256(body).hexdigest(),
@@ -88,7 +88,7 @@ def response_diagnostics(body, headers):
             bom = name
             break
     lower = body.lower()
-    result.update(structure_analysis="OBSERVED_RAW_BYTES", utf8_strict_valid=utf8_valid, bom=bom,
+    result.update(structure_analysis="OBSERVED_DECODED_BYTES" if decoded else "OBSERVED_RAW_BYTES", utf8_strict_valid=utf8_valid, bom=bom,
                   gzip_magic=body.startswith(b"\x1f\x8b\x08"), nul_bytes_present=b"\x00" in body,
                   html_tag=bool(re.search(rb"<html(?:\s|>)", lower)),
                   head_tag=bool(re.search(rb"<head(?:\s|>)", lower)),
@@ -112,9 +112,14 @@ class PageTransport(download.BoundedTransport):
         super().__init__(jar, initial_requests, allow_canonical_redirect=allow_canonical_redirect,
                          request_limit=REQUEST_LIMIT + int(allow_canonical_redirect))
         self.response_diagnostics = None
+        self.content_decoding = self.decoded_response_diagnostics = None
 
     def observe_metadata(self, body, headers):
         self.response_diagnostics = response_diagnostics(body, headers)
+
+    def observe_content_decoding(self, body, headers, evidence):
+        self.content_decoding = evidence
+        self.decoded_response_diagnostics = response_diagnostics(body, headers, decoded=True) if body is not None else None
 
     def allow_media(self, urls):
         raise ProbeStop("page_probe_forbids_media")
@@ -176,7 +181,8 @@ def run_worker(profile, *, browser_confirmed, allow_canonical_redirect=False):
                 report["page_final_url"] = response.url  # Only the fixed URL or its strictly validated slash target.
             finally:
                 response.close()
-        report["page_response_sha256"] = hashlib.sha256(body).hexdigest()
+        # Preserve the schema-2 raw-response hash meaning even though body is now decoded.
+        report["page_response_sha256"] = transport.content_decoding["raw_sha256"]
         report["page_identity"] = page_identity(body)
         report["page"] = "PASS"
     except ProbeStop as exc:
@@ -190,6 +196,10 @@ def run_worker(profile, *, browser_confirmed, allow_canonical_redirect=False):
                           media_redirect_count=transport.redirect_count)
             if transport.response_diagnostics is not None:
                 report["response_diagnostics"] = transport.response_diagnostics
+            if transport.content_decoding is not None:
+                report["content_decoding"] = transport.content_decoding
+            if transport.decoded_response_diagnostics is not None:
+                report["decoded_response_diagnostics"] = transport.decoded_response_diagnostics
     return report
 
 
@@ -243,7 +253,7 @@ def main(argv=None):
         output = common.open_evidence(args.output)
     except (ValueError, OSError):
         parser.error("Evidence must be a new writable file inside .artifacts; no credentials read or requests sent")
-    report = {"schema_version": 2, "experiment": "U02_FIXED_PAGE_RESPONSE_DIAGNOSTIC", "bvid": FIXED_BVID,
+    report = {"schema_version": 3, "experiment": "U02_FIXED_PAGE_BOUNDED_GZIP", "bvid": FIXED_BVID,
               "timestamp_utc": datetime.now(timezone.utc).isoformat(), "research_gate": "NEEDS_MORE_EVIDENCE",
               "request_limit": REQUEST_LIMIT + int(args.allow_canonical_redirect), "worker_timeout_seconds": WORKER_TIMEOUT,
               "allow_canonical_redirect": args.allow_canonical_redirect,

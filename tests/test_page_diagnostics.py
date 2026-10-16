@@ -1,6 +1,7 @@
 """Diagnostic-only observations must preserve identity, request, and privacy gates."""
 from email.message import Message
 import gzip
+import hashlib
 import http.cookiejar
 import importlib.util
 import io
@@ -180,3 +181,107 @@ def test_missing_browser_precondition_never_reads_credentials(monkeypatch):
     monkeypatch.setattr(page.common, "load_bili_cookies", forbidden)
     report = page.run_worker(PRIVATE, browser_confirmed=False)
     assert report["request_count"] == 0 and "response_diagnostics" not in report
+
+
+@pytest.mark.parametrize("content,reason", [(html(), None), (b"window._riskdata_={}", "platform_verification_page"),
+    (b"window.__riskdata__={}", "platform_verification_page"), (b"CAPTCHA", "page_identity_missing"),
+    (html().replace(page.FIXED_BVID.encode(), b"BV1bK411W797"), "page_identity_mismatch"),
+    (html() + b"\xff", "page_initial_state_invalid")], ids=["valid", "risk", "risk2", "word", "wrong-bv", "bad-utf8"])
+def test_gzip_worker_checks_decoded_content_and_preserves_raw_evidence(content, reason, offline_worker):
+    raw = gzip.compress(content, mtime=0)
+    offline_worker["responses"] += [urllib.error.HTTPError(page.FIXED_URL, 301, PRIVATE,
+        headers(("Location", "/video/BV13x41117TL/")), io.BytesIO()),
+        (raw, headers(("Content-Type", "text/html; charset=utf-8"), ("Content-Encoding", "gzip")))]
+    report = page.run_worker(PRIVATE, browser_confirmed=True, allow_canonical_redirect=True)
+    assert report["request_count"] == len(offline_worker["calls"]) == 3
+    assert report["page_redirect_count"] == 1 and report["media_downloads"] == 0
+    assert report["content_decoding"]["status"] == "DECODED"
+    assert report["response_diagnostics"]["observed_sha256"] == hashlib.sha256(raw).hexdigest()
+    decoded = report["decoded_response_diagnostics"]
+    assert decoded["analysis_layer"] == "CONTENT_DECODED"
+    assert decoded["observed_sha256"] == hashlib.sha256(content).hexdigest()
+    assert decoded["observed_bytes"] == len(content)
+    assert report["page"] == ("BLOCKED" if reason else "PASS")
+    if reason:
+        assert report["stop_reason"] == reason
+    else:
+        assert report["page_response_sha256"] == hashlib.sha256(raw).hexdigest()
+        assert report["page_response_sha256"] != decoded["observed_sha256"]
+        assert report["page_final_url"] == page.FIXED_URL + "/" and report["page_http_status"] == 200
+    assert PRIVATE not in json.dumps(report)
+
+
+@pytest.mark.parametrize("kind,reason", [("invalid", "metadata_gzip_invalid"), ("truncated", "metadata_gzip_incomplete"),
+    ("trailing", "metadata_gzip_trailing_data"), ("oversized", "metadata_decoded_size_limit"),
+    ("unknown", "content_encoding_unsupported")])
+def test_failed_decoding_has_raw_evidence_but_no_decoded_summary(kind, reason, offline_worker):
+    raw = gzip.compress(html(), mtime=0)
+    if kind == "invalid": raw = PRIVATE.encode()
+    if kind == "truncated": raw = raw[:-1]
+    if kind == "trailing": raw += PRIVATE.encode()
+    if kind == "oversized": raw = gzip.compress(b"x" * (page.download.MAX_METADATA_BYTES + 1), mtime=0)
+    offline_worker["responses"].append((raw, {"Content-Encoding": PRIVATE if kind == "unknown" else "gzip"}))
+    report = page.run_worker(PRIVATE, browser_confirmed=True)
+    assert report["page"] == "BLOCKED" and report["stop_reason"] == reason
+    assert report["request_count"] == len(offline_worker["calls"]) == 2
+    assert report["content_decoding"]["status"] == "FAILED"
+    assert report["response_diagnostics"]["observed_sha256"] == hashlib.sha256(raw).hexdigest()
+    assert "decoded_response_diagnostics" not in report and "page_response_sha256" not in report
+    assert PRIVATE not in json.dumps(report)
+
+
+@pytest.mark.parametrize("content,reason,code", [(b'{"code":0,"data":{}}', None, None),
+    (b'{"code":-101}', "api_stop", -101), (b'{"code":-352}', "api_stop", -352),
+    (b"not json", "api_non_json", None), (b"window._riskdata_={}", "platform_verification_page", None)])
+def test_shared_download_transport_checks_compressed_api(content, reason, code, offline_worker):
+    transport = page.download.BoundedTransport(http.cookiejar.CookieJar())
+    calls = []
+    def reply(request, timeout):
+        calls.append(request)
+        result = io.BytesIO(gzip.compress(content, mtime=0))
+        result.status, result.headers = 200, {"Content-Encoding": "gzip", "Content-Type": "application/json"}
+        return result
+    transport.opener.open = reply
+    url = "https://api.bilibili.com/x/player/pagelist?bvid=" + page.FIXED_BVID
+    if reason:
+        with pytest.raises(page.ProbeStop, match=reason) as caught: transport.request(url)
+        if code is not None: assert caught.value.evidence["api_code"] == code
+    else:
+        with transport.request(url) as response:
+            assert response.read() == content and response.get_header("Content-Encoding") is None
+    assert transport.count == len(calls) == 1
+
+
+def test_real_extractor_receives_decoded_first_page_without_extra_request(monkeypatch, offline_worker, tmp_path):
+    from yt_dlp.extractor.bilibili import BiliBiliIE
+    transport = page.download.BoundedTransport(http.cookiejar.CookieJar())
+    calls = []
+    def reply(request, timeout):
+        calls.append(request)
+        result = io.BytesIO(gzip.compress(html(), mtime=0))
+        result.status, result.headers = 200, {"Content-Encoding": "gzip", "Content-Type": "text/html; charset=utf-8"}
+        return result
+    transport.opener.open = reply
+    def inspect(self, pattern, webpage, *a, **kw):
+        assert webpage == html().decode()
+        raise page.ProbeStop("offline_decoded_extractor_observed")
+    monkeypatch.setattr(BiliBiliIE, "_search_json", inspect)
+    with pytest.raises(page.ProbeStop, match="offline_decoded_extractor_observed"):
+        page.download.download_one(page.download.SAMPLES[0], http.cookiejar.CookieJar(), transport,
+                                   tmp_path, Path("ffmpeg.exe"), None)
+    assert transport.count == len(calls) == 1 and not list(tmp_path.iterdir())
+
+
+def test_media_branch_does_not_decompress(monkeypatch, offline_worker):
+    transport = page.download.BoundedTransport(http.cookiejar.CookieJar())
+    urls = ["https://test.bilivideo.com/video", "https://test.bilivideo.com/audio"]
+    transport.allow_media(urls)
+    raw = gzip.compress(PRIVATE.encode(), mtime=0)
+    result = io.BytesIO(raw)
+    result.status, result.headers = 206, {"Content-Encoding": "gzip", "Content-Type": "video/mp4"}
+    transport.opener.open = lambda *a, **kw: result
+    def forbidden(*a, **kw): pytest.fail("Media entered metadata decoding")
+    monkeypatch.setattr(page.download, "decode_metadata", forbidden)
+    with transport.request(urls[0]) as response:
+        assert response.read() == raw and response.status == 206 and response.get_header("Content-Encoding") == "gzip"
+    assert transport.count == 1
