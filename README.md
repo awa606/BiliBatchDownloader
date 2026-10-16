@@ -10,7 +10,7 @@
 - 待验证：真实媒体下载与音轨合并、动态图集、真实动图、动态视频、转发归属、作者完整作品分页。
 - 待实现：新版界面、SQLite 作品库、后台队列、内容截图、旧文件原位导入、便携 EXE。
 - 门禁：Research `NEEDS MORE EVIDENCE`；账号前提 `PASS`；最新单页实验 `BLOCKED_PAGE_IDENTITY_MISSING`；Design `NOT_STARTED`。
-- 工程检查：本轮本地264项离线测试通过（原204项保留，新增60项），编译和依赖检查通过；本轮Windows CI待推送后核验。前次提交`9bc21d6`的[Windows CI](https://github.com/awa606/BiliBatchDownloader/actions/runs/38894318400)204项通过，不能代替本轮CI或真实下载验收。
+- 工程检查：本轮本地264项离线测试通过（原204项保留，新增60项），编译和依赖检查通过；提交`ecf5d1e`的[Windows CI](https://github.com/awa606/BiliBatchDownloader/actions/runs/38899929804)也为264项通过（Python3.13.16，7.01秒）。工程检查不能替代真实下载或产品验收。
 
 首版需求与验收见[功能与验收矩阵](docs/功能与验收矩阵.md)和[维护Issue #1](https://github.com/awa606/BiliBatchDownloader/issues/1)。当前证据见[研究结果](docs/研究结果-20261016.md)，实验顺序见[研究预注册](docs/研究预注册.md)，候选比较和空决策见[研究决策记录](docs/研究决策记录.md)。
 

@@ -4,7 +4,7 @@
 
 - 页面和下载探针新增默认关闭的`--allow-canonical-redirect`，共用精确目标校验；仅实际301单个Location、同源/同BV/同查询、路径补一个尾斜杠可跟随一次。
 - 页面默认2请求、启用时3请求；下载仍36请求。API零跳转、CDN规则保留，页面/CDN分别计数，真实最终URL正确返回，报告不含原Location或陌生地址。
-- 保留204项回归，新增60项，最终本地264项通过；编译/依赖检查通过。本轮Windows CI待推送核验。
+- 保留204项回归，新增60项，最终本地264项通过；编译/依赖检查通过。源码`ecf5d1e`的[Windows CI](https://github.com/awa606/BiliBatchDownloader/actions/runs/38899929804)264项通过（Python3.13.16，7.01秒）。
 - 实际单页：navPASS，301确认为单个根相对的尾斜杠目标，跟随后200；身份检查page_identity_missing，BLOCKED，共3请求、0媒体。条件三资产下载未运行；未追加B站请求。
 - 旧412、旧零跟随301及本次失败均保留；下一步建议先诊断响应结构/编码契约。作者四类管理要求不变。Research仍NEEDS MORE EVIDENCE，无新EXE、Release或清理。
 
