@@ -157,6 +157,7 @@ class Bridge(QObject):
     @Slot()
     def togglePause(self):
         self._paused=not self._paused; self.lib.set_setting('paused','1' if self._paused else '0'); self.changed.emit()
+        if not self._paused: self.lib.set_setting('online_stopped','0')
 
     @Slot(str)
     def cancel(self,ident):
@@ -177,7 +178,7 @@ class Bridge(QObject):
 
     def tick(self):
         if self.process: return
-        task=self.lib.next_task(local_only=self._paused)
+        task=self.lib.next_task(local_only=self._paused,offline_only=self.lib.setting('online_stopped','0')=='1')
         if not task: return
         if task['kind'] in ('metadata','download') and not self._online:
             self.lib.update_task(task['id'],state='failed',error='online_gate_not_passed'); self.refresh(); return
@@ -216,6 +217,10 @@ class Bridge(QObject):
     def fail(self,reason):
         if self.active and not self.terminal:
             self.terminal=True; self.lib.update_task(self.active['id'],state='failed',phase='失败',error=reason)
+            if reason in ('http_401','http_403','http_412','http_429','login_expired','session_cookie_unavailable',
+                          'cookie_load_failed','platform_api_stop','verification_page'):
+                self._paused=True; self.lib.set_setting('paused','1')
+                self.lib.set_setting('online_stopped','1')
             self.tell(ERRORS.get(reason,'任务停止：'+reason))
 
     def readWorker(self):

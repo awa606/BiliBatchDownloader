@@ -24,7 +24,7 @@
 
 ## 启动与使用
 
-本机候选包：`dist/BiliBatchDownloader-0.1.0-verify-r5/BiliBatchDownloader.exe`。保留同目录的 `BiliDeskWorker.exe` 与 `_internal`，不要只复制一个EXE。打开同目录 `使用手册.html` 可离线阅读。
+本机候选包：`dist/BiliBatchDownloader-0.1.0-verify-r6/BiliBatchDownloader.exe`。保留同目录的 `BiliDeskWorker.exe` 与 `_internal`，不要只复制一个EXE。打开同目录 `使用手册.html` 可离线阅读。
 
 本地数据库与设置位于 `%LOCALAPPDATA%/BiliBatchDownloaderDesk`，不随程序目录或公开源码分发。本机已将授权的3个视频、18张截图原位登记；公开包为空库，不包含用户媒体。
 

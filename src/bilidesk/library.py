@@ -182,7 +182,7 @@ class Library:
         with self.connection(True) as db:
             return [dict(r) for r in db.execute('SELECT * FROM tasks ORDER BY created DESC LIMIT 100')]
 
-    def next_task(self,local_only=False):
+    def next_task(self,local_only=False,offline_only=False):
         with self.connection(True) as db:
-            row=db.execute("SELECT * FROM tasks WHERE state='queued'"+(" AND kind!='download'" if local_only else '')+" ORDER BY created LIMIT 1").fetchone()
+            row=db.execute("SELECT * FROM tasks WHERE state='queued'"+(" AND kind NOT IN ('metadata','download')" if offline_only else " AND kind!='download'" if local_only else '')+" ORDER BY created LIMIT 1").fetchone()
             return dict(row) if row else None

@@ -27,5 +27,12 @@ def test_qml_real_bridge_browse_missing_file_and_shutdown(tmp_path,monkeypatch):
     while not bridge.message and time.monotonic()<deadline: app.processEvents(); time.sleep(.02)
     assert '不存在' in bridge.message
     assert bridge.paused  # Opening a file must not resume the download queue.
+    blocked=bridge.lib.enqueue('metadata',{},'rate_limit')
+    bridge.active={'id':blocked}; bridge.terminal=False; bridge._paused=False
+    bridge.fail('http_412')
+    assert bridge.paused and bridge.lib.setting('online_stopped')=='1'
+    bridge.lib.enqueue('metadata',{},'pending_online')
+    assert bridge.lib.next_task(offline_only=True) is None
+    bridge.active=None
     bridge.shutdown()
     engine.rootObjects()[0].close()
