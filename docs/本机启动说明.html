@@ -1,0 +1,10 @@
+<!doctype html><html lang="zh-CN"><meta charset="utf-8"><title>Bili作品库：本机启动与数据位置</title>
+<style>body{font:16px/1.8 "Microsoft YaHei",sans-serif;max-width:900px;margin:40px auto;padding:24px;color:#283044;background:#f8f9fc}h1,h2{color:#c85784}code{background:#eceef6;padding:3px 6px}</style>
+<h1>本机启动与数据位置</h1>
+<p>当前为0.1.0 VERIFY候选版。请先关闭旧窗口，再双击 <code>D:\sd.webui\bili_desktop\启动Bili作品库.cmd</code>。该入口调用r8，并明确指定已核验作品库；用户已确认作品、截图和播放正常。</p>
+<h2>作品库没有丢失</h2><p>本机实际使用 <code>D:\sd.webui\bili_desktop\.private\library</code>。数据库由原库通过SQLite备份建立，包含2位作者、2部作品、3个分P及18张预览的登记；视频及预览仍引用原路径，没有复制、移动或重新下载。</p>
+<p>直接双击EXE会使用默认用户目录。此次检查发现，两种启动环境中的同名默认路径读到不同数据库内容，已保留原库和失败证据，没有修改Windows环境设置。以后本机统一使用上述入口；后续版本更新入口时继续保留这个独立库。</p>
+<h2>备份与便携包</h2><p>关闭应用后，备份整个 <code>.private\library</code>。仅备份数据库不会备份所引用的视频和截图，请同时保留原媒体路径。不要删除原始视频或原始证据。</p>
+<p>EXE便携包和GitHub不包含私人作品库、媒体或浏览器档案。将空包复制到其他电脑不会自动带上当前作品。通用旧目录导入及跨机器路径重定位尚未提供。</p>
+<h2>本地打开</h2><p>点击作品后选“播放视频”。文件检查独立于下载队列，再交给默认播放器；文件缺失或大小变化会提示。应用交接测量不代表夸克实际出画耗时。原窗口出现“作品库读取失败”时，设置中可查看当前库位置；脱敏诊断保存在相应库目录。</p>
+<p>一般操作见便携包的使用手册。图库、实况、GIF、完整关注与作者索引仍未开放；当前不是完整功能的稳定发布。</p></html>
