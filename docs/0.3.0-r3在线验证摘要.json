@@ -1,0 +1,185 @@
+{
+  "status": "PASS",
+  "source_commit": "e48113c7820ad18ba352980a93a3b6995bc01857",
+  "requests": 16,
+  "media_requests": 12,
+  "media_bytes": 9103632,
+  "retries": 0,
+  "redirects": 0,
+  "selected": [
+    1,
+    5,
+    9
+  ],
+  "saved_groups": 3,
+  "total_groups": 9,
+  "unselected_video_requests": 0,
+  "minimum_start_intervals": [
+    1.0001730000000002,
+    1.000241
+  ],
+  "metadata": {
+    "description_status": "present",
+    "description_chars": 4,
+    "description_sha256": "497fd82b1a5192a8010fd0ec77f28f831cfa6127b45642618b246cff3696b45e",
+    "tags_status": "empty",
+    "tags_count": 0,
+    "topics_count": 0,
+    "metadata_parity": [
+      {
+        "type": "metadata_parity",
+        "schema": 1,
+        "status": "PASS",
+        "local_count": 1,
+        "native_count": 1,
+        "local_sha256": "312492cae128619279d9e08cab1b53a96d73aa59de29b8eb0a08e83e1b7c7685",
+        "native_sha256": "312492cae128619279d9e08cab1b53a96d73aa59de29b8eb0a08e83e1b7c7685"
+      }
+    ]
+  },
+  "page_matches_prior_failure": true,
+  "assets": [
+    {
+      "sequence": 1,
+      "role": "image",
+      "format": "jpg",
+      "size": 486506,
+      "sha256": "6ac73b6c2a8008d6d96abfb9e0a0cd9d329f3db67c1769b135adbb6cc4b31fde",
+      "source_path_sha256": "99425f5ecfc75773c61e5795631f1714be25e237f2c1a0e403ca78e5c867c303",
+      "verification": {
+        "decode": "PASS",
+        "streams": [
+          {
+            "codec_type": "video",
+            "codec_name": "mjpeg",
+            "width": 4032,
+            "height": 3024
+          }
+        ],
+        "demuxer": "image2",
+        "decoded_frames": 1,
+        "duration_seconds": null,
+        "duration_evidence": "NOT_APPLICABLE_STILL_IMAGE"
+      }
+    },
+    {
+      "sequence": 1,
+      "role": "live_video",
+      "format": "mp4",
+      "size": 304613,
+      "sha256": "cc21d65f8a8d75a591406523e727517d17157dacdb8afdac141ad69e67e2e7d6",
+      "source_path_sha256": "86a5379479a121b37e63a112e4bd16b30d482c09c8c03f2a91c6ae21dc6094e1",
+      "verification": {
+        "decode": "PASS",
+        "streams": [
+          {
+            "codec_type": "video",
+            "codec_name": "h264",
+            "width": 1440,
+            "height": 1080
+          }
+        ],
+        "demuxer": "mov",
+        "decoded_frames": 51,
+        "duration_seconds": 1.699938,
+        "duration_evidence": "FFPROBE"
+      }
+    },
+    {
+      "sequence": 5,
+      "role": "image",
+      "format": "jpg",
+      "size": 178865,
+      "sha256": "32b6d0172361dff2c08ff598266655bbd4e02a3d46fd21d4195d17174908458f",
+      "source_path_sha256": "b2be840b155b5d9a573550cb0a806741f92b587d0a60096652e9f3348df306f6",
+      "verification": {
+        "decode": "PASS",
+        "streams": [
+          {
+            "codec_type": "video",
+            "codec_name": "mjpeg",
+            "width": 2316,
+            "height": 3088
+          }
+        ],
+        "demuxer": "image2",
+        "decoded_frames": 1,
+        "duration_seconds": null,
+        "duration_evidence": "NOT_APPLICABLE_STILL_IMAGE"
+      }
+    },
+    {
+      "sequence": 5,
+      "role": "live_video",
+      "format": "mp4",
+      "size": 442146,
+      "sha256": "0844126d4c85f9f5528243e1981c4de0ae5ea58b96a846739798b62a74ef1c28",
+      "source_path_sha256": "21558a664bd36b3a966d89c8bbef7fd91d110edf53267c5bf971a40f701cfdf9",
+      "verification": {
+        "decode": "PASS",
+        "streams": [
+          {
+            "codec_type": "video",
+            "codec_name": "h264",
+            "width": 1080,
+            "height": 1440
+          }
+        ],
+        "demuxer": "mov",
+        "decoded_frames": 88,
+        "duration_seconds": 2.933313,
+        "duration_evidence": "FFPROBE"
+      }
+    },
+    {
+      "sequence": 9,
+      "role": "image",
+      "format": "jpg",
+      "size": 1082559,
+      "sha256": "bdec9f9dece90b785d5cb3d369eee940191c24a6a89e83cf36cd8e8c3d5a843b",
+      "source_path_sha256": "52ed55ea678e71ce9caaa258d2b95cefb8acb19a7c3f1dfd93d0733bfae0e025",
+      "verification": {
+        "decode": "PASS",
+        "streams": [
+          {
+            "codec_type": "video",
+            "codec_name": "mjpeg",
+            "width": 4284,
+            "height": 5712
+          }
+        ],
+        "demuxer": "image2",
+        "decoded_frames": 1,
+        "duration_seconds": null,
+        "duration_evidence": "NOT_APPLICABLE_STILL_IMAGE"
+      }
+    },
+    {
+      "sequence": 9,
+      "role": "live_video",
+      "format": "mp4",
+      "size": 616553,
+      "sha256": "da25c7e57d36ebc627312fd14d0cf5f094cd795f635dfa673759649f8cdc9af8",
+      "source_path_sha256": "5b1d18fd308490b3a3e8848dc05851e8346d4820d60038fcf8c23a56a3fdd5e6",
+      "verification": {
+        "decode": "PASS",
+        "streams": [
+          {
+            "codec_type": "video",
+            "codec_name": "h264",
+            "width": 1080,
+            "height": 1440
+          }
+        ],
+        "demuxer": "mov",
+        "decoded_frames": 82,
+        "duration_seconds": 2.863313,
+        "duration_evidence": "FFPROBE"
+      }
+    }
+  ],
+  "original_43_files_unchanged": true,
+  "original_library_and_evidence_unchanged": true,
+  "registration_sha256": "bd0733ddfb64bc65c2bc957d1893b91056e5dea5d899518761e2b1c726a9d7f7",
+  "report_sha256": "b7d2f3f5dfb1e696a9e8f67eca7052d02945882bbff934a71714ebe17f7afe42"
+}

@@ -1,0 +1,31 @@
+{
+  "source_commit": "e48113c7820ad18ba352980a93a3b6995bc01857",
+  "status": "REMOTE_BYTES_VERIFIED",
+  "assets": [
+    {
+      "repository": "awa606/BiliBatchDownloader",
+      "release_id": 415766706,
+      "tag": "v0.3.0-verify-r3",
+      "release_url": "https://github.com/awa606/BiliBatchDownloader/releases/tag/v0.3.0-verify-r3",
+      "asset_id": 650305328,
+      "asset_name": "BiliBatchDownloader-0.3.0-VERIFY-r3-windows-x64.zip",
+      "size": 139129556,
+      "sha256": "6513d2ab3222f8d59ebf3e11b5925485204089cb0f85199e10fe907823c9e56b",
+      "verified_at": "2026-10-17T11:34:35+00:00"
+    },
+    {
+      "repository": "awa606/BiliBatchDownloader",
+      "release_id": 415766706,
+      "tag": "v0.3.0-verify-r3",
+      "release_url": "https://github.com/awa606/BiliBatchDownloader/releases/tag/v0.3.0-verify-r3",
+      "asset_id": 650305330,
+      "asset_name": "BiliBatchDownloader-0.3.0-VERIFY-r3-windows-x64.zip.sha256",
+      "size": 119,
+      "sha256": "85d370626e1cb0b1dbddba87635c4bf2a2747634223155680b1b94968e702e2f",
+      "verified_at": "2026-10-17T11:34:26+00:00"
+    }
+  ],
+  "private_files_uploaded": false,
+  "local_files_deleted": 0,
+  "product_experience": "MANUAL_REQUIRED"
+}

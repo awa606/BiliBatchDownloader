@@ -1,16 +1,23 @@
 # BiliBatchDownloader 作者作品库
 
-中文 Windows 桌面应用：**本地作者 → 分类 → 作品 → 分P截图／成组图片与实况 → 本地打开**。当前 **0.2.0 VERIFY离线图库候选版**，采用浅色卡片、B站粉色点缀，参考 PixivDesk 的三级浏览和后台任务模式。
+中文 Windows 桌面应用：**本地作者 → 分类 → 作品 → 分P截图／成组图片与实况 → 本地打开**。新增 **0.3.0 VERIFY r3联网图库候选版**（新操作体验待确认，已验收0.2.0保留），采用浅色卡片、B站粉色点缀，参考 PixivDesk 的三级浏览和后台任务模式。
 
-本轮在视频作品库基础上交付离线图库；按用户批准的模块方式交付，整体研究仍 **NEEDS MORE EVIDENCE**。已有功能与最终完整需求分别记录，不把固定小样本成功外推到全部B站内容。
+本轮补齐单条动态图库联网选组和真实文字信息；按用户批准的模块方式交付，整体研究仍 **NEEDS MORE EVIDENCE**。已有功能与最终完整需求分别记录，不把固定小样本成功外推到全部B站内容。
 
 ## 0.3.0 图库联网候选开发
 
 已实现单条动态读取→真实正文/标签及照片预览→手动选组（默认不勾选）→成组下载归档。沿用gallery-dl 1.32.16原生流程，独立Qt-free worker；实况配套视频仅请求所选组，不新增自动角色识别。布局保持现有结构。
 
-最新[r2实测](docs/0.3.0-r2验证记录.md)：修复后的四图准备6请求、选第1/3组归档2请求均PASS，发布时间兼容修复已在同一真实页面通过；正文入实验私有库、该样本标签为空。实况准备在2请求后因段落`text:null`被本地拒绝，实况媒体0请求，累计10请求后停止；不补跑、不发布0.3.0 Release。当前已通过体验验收的版本仍为0.2.0，现用库/入口不变。[原修复](docs/图库元数据兼容修复-20261017.md)、[历史失败](docs/图库联网字段结构失败-20261017.md)及[模块评审](docs/图库联网模块评审.md)分别保留。
+最新[r3实测](docs/0.3.0-r3验证记录.md)：`text:null`兼容修复通过；同一实际页面正文与gallery-dl原生片段一致。实况准备11请求、选择第1/5/9组下载5请求均PASS，零重试/跳转，未选MP4零请求。正文、作者和发布时间进入独立候选库；样本标签为空，真实有标签场景仍待验。四图准备/选1和3在r2已通过，本轮未重跑。
 
-## 0.2.0 本轮交付
+本机946 PASS/1权限SKIP，[Windows CI 947 PASS/0 SKIP](https://github.com/awa606/BiliBatchDownloader/actions/runs/39028249820)，冻结研究12 PASS；实际冻结程序、选组worker与候选库22项媒体检查PASS。新用户操作体验、无Python干净环境及完整首屏2秒仍待验收。
+
+**本机新入口：[启动Bili联网图库候选版.cmd](启动Bili联网图库候选版.cmd)**，明确使用r3包和`.private/library-gallery-online-verify-r3`。候选从0.2一致性备份，3作者/4作品及原媒体保留，只补已验证文字。默认派发暂停，启动不自动请求；“添加图文”与下载由用户点击触发。旧0.2和r8入口保持可用。
+
+[下载0.3.0 VERIFY r3预发布](https://github.com/awa606/BiliBatchDownloader/releases/tag/v0.3.0-verify-r3)：公开包为空库，含对应源码、第三方材料、手册及SHA清单；ZIP与校验文本已完整取回核对一致。解压后进入portable，双击EXE离线浏览，“启用图库联网.cmd”开放图库入口。来源与历史失败见[r2记录](docs/0.3.0-r2验证记录.md)、[来源核验](docs/gallery-dl-1.32.16来源核验.json)和[模块评审](docs/图库联网模块评审.md)。
+
+
+## 历史0.2.0离线图库交付
 
 图库模块研究与设计通过，详见[评审](docs/图库模块评审.md)与[交付记录](docs/0.2.0交付记录.md)。用户已确认9组实况完整播放且画面与照片对应，并确认新界面、成组预览和本地打开正常。新模块为独立离线候选，保留原r8。
 
@@ -35,15 +42,15 @@
 
 每任务暂限 **12次请求、230秒、15秒单次网络等待、最高360p、64MiB总HTTP传输、零自动重试**。元数据与响应头也计入字节上限。达到限制或出现登录/平台限制立即停止，不扩大预算。截图未通过不会抹掉已核验的视频。
 
-固定4PNG及9组JPG＋MP4已通过gallery-dl原生下载、身份/配对/顺序/SHA及完整解码。13图默认查看和9组默认播放器完整播放已验收；本轮接入离线图库，工程检查、冻结产品与新界面人工体验均有独立通过记录。
+固定4PNG及9组JPG＋MP4已通过gallery-dl原生下载、身份/配对/顺序/SHA及完整解码。13图默认查看和9组默认播放器完整播放已验收；0.2已接入离线图库并通过用户体验。0.3联网和文字功能的本轮检查见上方r3记录，新操作体验另验。
 
-尚未完成：本人关注的产品同步、完整作者索引、联网图库下载、GIF、独立动态视频、转发归属、可靠投稿分类依据、头像/原站封面缓存、通用旧目录扫描及跨启动无缝续传。新增图库不扩展视频联网验证范围。
+尚未完成：本人关注的产品同步、完整作者索引、GIF、独立动态视频、转发归属、可靠投稿分类依据、头像/原站封面缓存、通用旧目录扫描及跨启动无缝续传。新增图库不扩展视频联网验证范围。
 
-最新工程、包测试及CI见[0.2.0交付记录](docs/0.2.0交付记录.md)：本机785通过、1权限跳过；[Windows CI](https://github.com/awa606/BiliBatchDownloader/actions/runs/39010139356)786通过、0跳过，六组窗口/缩放实际媒体检查通过。历史视频结果见[0.1.0交付记录](docs/0.1.0交付记录.md)。用户已确认r8通过本机指定目录入口显示作品、截图并正常播放。r7/r8直接启动曾读到空库：同名默认用户路径在检查与用户启动环境下对应的数据库哈希不同，原视频未丢失；改为明确的独立目录后两边一致。底层环境机制尚未判定。无Python干净Windows与完整可交互首屏≤2秒尚未验收。
+0.2阶段的工程、包测试及CI见[0.2.0交付记录](docs/0.2.0交付记录.md)：本机785通过、1权限跳过；[Windows CI](https://github.com/awa606/BiliBatchDownloader/actions/runs/39010139356)786通过、0跳过，六组窗口/缩放实际媒体检查通过。历史视频结果见[0.1.0交付记录](docs/0.1.0交付记录.md)。用户已确认r8通过本机指定目录入口显示作品、截图并正常播放。r7/r8直接启动曾读到空库：同名默认用户路径在检查与用户启动环境下对应的数据库哈希不同，原视频未丢失；改为明确的独立目录后两边一致。底层环境机制尚未判定。无Python干净Windows与完整可交互首屏≤2秒尚未验收。
 
-用户已明确后续优先跑通功能，布局调整后置。下一模块优先接入原生图库下载，并保存/显示真实动态正文和原站标签；确认没有可留空，待获取和失败不得冒充没有。当前两个图库报告不含这些字段，详情仍显示待获取。
+用户要求功能优先、布局后置。0.3已接入原生图库下载和真实文字；有正文/原站标签就显示，确认没有可留空，待获取/失败不冒充没有。旧0.2导入报告不含文字，原库仍保持旧状态；新r3库经清单核对后补入已验证信息。
 
-## 启动与使用
+## 旧版启动与使用（0.2/r8回退入口）
 
 **本机图库入口：[启动Bili图库候选版.cmd](启动Bili图库候选版.cmd)**。它明确使用 `.private/library-gallery-verify` 和 `dist/BiliBatchDownloader-0.2.0-verify-r1`，检查库存在后以离线模式启动。候选库由旧库一致性备份建立，3作者、4作品、3视频分P、4PNG、9组实况；媒体原位引用。
 
@@ -71,7 +78,7 @@ $env:BILI_TEST_FFMPEG = '你的独立工具目录\ffmpeg.exe'
 .\.venv\Scripts\python.exe scripts/benchmark_library.py --output .artifacts/benchmark-new-run
 ```
 
-每次使用新的输出目录，保留旧失败证据。打包使用 `scripts/build_windows.py --name BiliBatchDownloader-0.2.0-新标识`；需先准备 `build/license-cache` 中完整GPLv3/LGPLv3文本，构建绝不覆盖旧目录。详见[第三方边界](docs/第三方依赖.md)。
+每次使用新的输出目录，保留旧失败证据。打包使用 `scripts/build_windows.py --name BiliBatchDownloader-0.3.0-新标识`；需先准备 `build/license-cache` 中完整GPLv3/LGPLv3文本，构建绝不覆盖旧目录。详见[第三方边界](docs/第三方依赖.md)。
 
 ## 项目维护
 
@@ -86,4 +93,4 @@ $env:BILI_TEST_FFMPEG = '你的独立工具目录\ffmpeg.exe'
 
 ## 参考方案
 
-[yt-dlp官方嵌入](https://github.com/yt-dlp/yt-dlp#embedding-yt-dlp)、[gallery-dl B站提取器](https://github.com/mikf/gallery-dl/blob/v1.32.16/gallery_dl/extractor/bilibili.py)、[PixivUtil2](https://github.com/Nandaka/PixivUtil2)、[Qt进程模型](https://doc.qt.io/qtforpython-6/PySide6/QtCore/QProcess.html)。Douzy仅为用户指定的体验参考，未确认可复用桌面源码；不把其他抖音CLI项目标作Douzy。
+[yt-dlp官方嵌入](https://github.com/yt-dlp/yt-dlp#embedding-yt-dlp)、[gallery-dl实际使用的正式发行包](https://pypi.org/project/gallery-dl/1.32.16/)、[PixivUtil2](https://github.com/Nandaka/PixivUtil2)、[Qt进程模型](https://doc.qt.io/qtforpython-6/PySide6/QtCore/QProcess.html)。Douzy仅为用户指定的体验参考，未确认可复用桌面源码；不把其他抖音CLI项目标作Douzy。
