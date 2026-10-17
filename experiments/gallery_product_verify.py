@@ -91,6 +91,7 @@ def main():
                 budget=next((e for e in events if e.get('type')=='budget'),None)
                 count=budget['network_requests'] if budget else None
                 row.update(requests=count,budget=budget)
+                row['metadata_diagnostics']=[e for e in events if e.get('type')=='metadata_diagnostic']
                 report['total_requests']=None if count is None else report['total_requests']+count
                 error=next((e for e in events if e.get('type')=='error'),None)
                 result=next((e['result'] for e in events if e.get('type')=='result'),None)

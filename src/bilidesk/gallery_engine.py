@@ -9,7 +9,7 @@ from urllib.parse import urlsplit
 
 from .gallery_transport import (Stop, Guard, NAV, native_configuration, audit_state,
                                 original_modules, inspect_asset)
-from .gallery_metadata import metadata
+from .gallery_metadata import metadata, author_fields, MetadataStructureError
 
 PINS = {'gallery-dl':'1.32.16','requests':'2.34.2','urllib3':'2.8.0'}
 
@@ -94,11 +94,13 @@ def run_stage(dynamic_id,phase,directory,jar,ffmpeg,*,prior=None,selected=(),emi
                     raise Stop('author_identity_mismatch')
                 author=authors[0]; uid=str(author.get('mid'))
                 if not re.fullmatch('[1-9][0-9]{0,19}',uid): raise Stop('author_identity_mismatch')
-                try: result.update(metadata(value))
-                except (ValueError,KeyError,TypeError): raise Stop('gallery_metadata_structure_unknown') from None
-                if not isinstance(author.get('name'),str) or type(author.get('pub_ts'))!=int:
-                    raise Stop('gallery_metadata_structure_unknown')
-                result.update(dynamic_id=dynamic_id,uid=uid,author=author['name'],published=author['pub_ts'])
+                try:
+                    result.update(metadata(value))
+                    name, published = author_fields(author)
+                except MetadataStructureError as exc:
+                    emit(exc.diagnostic)
+                    raise Stop('gallery_metadata_structure_unknown') from None
+                result.update(dynamic_id=dynamic_id,uid=uid,author=name,published=published)
                 if len(json.dumps(result,ensure_ascii=False).encode())>256*1024:
                     raise Stop('gallery_metadata_limit')
                 return value

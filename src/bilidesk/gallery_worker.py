@@ -48,6 +48,8 @@ def execute(spec,emit):
     def record(event):
         if event.get('type')=='budget':
             (stage/'budget.json').write_text(json.dumps(event,indent=2),encoding='utf-8')
+        elif event.get('type')=='metadata_diagnostic':
+            (stage/'metadata-diagnostic.json').write_text(json.dumps(event,indent=2),encoding='utf-8')
         emit(event)
     def manifest(value):
         if prior is None: return

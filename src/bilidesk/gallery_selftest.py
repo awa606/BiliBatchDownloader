@@ -11,7 +11,7 @@ import zlib
 def run(directory,ffmpeg):
     import requests
     from urllib3 import HTTPResponse
-    from .gallery_engine import run_stage
+    from .gallery_engine import run_stage, Stop
     from .gallery_transport import Guard,NAV
     folder=Path(directory);folder.mkdir(parents=True,exist_ok=False)
     ident='1249456774436618276';page='https://www.bilibili.com/opus/'+ident
@@ -43,7 +43,18 @@ def run(directory,ffmpeg):
             g=Guard(page,prior['media_bytes'] if prior else 0,sleep=lambda _:None)
             outputs.append(run_stage(ident,phase,destination,jar,ffmpeg,prior=prior,selected=[1,3],guard=g))
         assert len(calls)==8 and outputs[1]['assets']==[]
-        report={'status':'PASS','synthetic_requests':8,'real_network_requests':0,'native_decode':'PASS','cache_reuse':'PASS'}
+        article['detail']['modules'].append({'module_type':'title','module_title':{'text':None}})
+        destination=folder/'rejected';destination.mkdir();events=[]
+        try:
+            run_stage(ident,'prepare',destination,jar,ffmpeg,guard=Guard(page,sleep=lambda _:None),emit=events.append)
+        except Stop as exc:
+            assert exc.reason=='gallery_metadata_structure_unknown'
+        else: raise AssertionError('metadata_failure_not_stopped')
+        assert events[0]['type']=='metadata_diagnostic' and events[0]['field']=='title_text'
+        assert len(calls)==10 and events[-1]['network_requests']==2 and events[-1]['media_requests']==0
+        assert not list(destination.iterdir())
+        report={'status':'PASS','synthetic_requests':10,'real_network_requests':0,'native_decode':'PASS',
+                'cache_reuse':'PASS','metadata_diagnostic':events[0],'failure_stops_before_media':'PASS'}
         (folder/'report.json').write_text(json.dumps(report),encoding='utf-8')
         return report
     finally:

@@ -1,0 +1,61 @@
+{
+  "schema": 1,
+  "status": "STOPPED",
+  "registration_sha256": "58c431fdcc4bbba21147d481bd22ac8b1c39a0dc7d6633edd0a69da2c790d255",
+  "local_report_sha256": "b7b898ccb3a6b4e3a04b14b8aa40c71263e920c4fa1f5377629b31dc5579426d",
+  "experiment_source_commit": "82091075c8c3c6bd51e8b504a41b40b93b835751",
+  "product_source_commit": "2dc18237e57dfd9073ccc27265dd8daa7b73e814",
+  "stages": [
+    {
+      "sample": "1249456774436618276",
+      "phase": "prepare",
+      "status": "FAIL",
+      "request_limit": 6,
+      "requests": 2,
+      "budget": {
+        "type": "budget",
+        "network_requests": 2,
+        "media_requests": 0,
+        "total_media_bytes": 0,
+        "requests": [
+          {
+            "number": 1,
+            "kind": "account",
+            "status": 200,
+            "started_seconds": 0.00334,
+            "raw_bytes": 1196,
+            "decoded_bytes": 3402,
+            "complete": true,
+            "decoding_status": "DECODED",
+            "raw_sha256": "2721f20d0443935858ba91fb70a93cbb7f6becf7a1d4b622fb361cf8f6440dc7",
+            "decoded_sha256": "d9bd9dae55c6afce13034030eedc3abc7cde2a24f7d6ebbcc193daa6487e801e"
+          },
+          {
+            "number": 2,
+            "kind": "page",
+            "status": 200,
+            "started_seconds": 1.003574,
+            "raw_bytes": 8046,
+            "decoded_bytes": 25209,
+            "complete": true,
+            "decoding_status": "DECODED",
+            "raw_sha256": "accac9f494d0f254dbc7b4f6e85bedfdf187ec31d99e7485efc6856ba3bd4e4b",
+            "decoded_sha256": "4b05796c898ee496c3839a7a06e14bd93476c71fb344193e6769a88b7e25939f"
+          }
+        ],
+        "elapsed_seconds": 1.505764,
+        "account": "PASS"
+      },
+      "reason": "gallery_metadata_structure_unknown"
+    }
+  ],
+  "total_requests": 2,
+  "not_started_stages": [
+    "images_download",
+    "livephoto_prepare",
+    "livephoto_download"
+  ],
+  "source_fingerprints_unchanged": true,
+  "cause_field": "UNKNOWN_NOT_RECORDED",
+  "raw_body_saved": false
+}
