@@ -34,7 +34,9 @@ def png(color):
 def response(url, body, status=200, headers=()):
     hdr = HTTPHeaderDict(headers)
     if 'Content-Type' not in hdr:
-        hdr.add('Content-Type', 'text/html; charset=utf-8' if body[:1] != b'\x89' else 'image/png')
+        suffix = Path(probe.urlsplit(url).path).suffix
+        hdr.add('Content-Type', {'.png': 'image/png', '.jpg': 'image/jpeg', '.mp4': 'video/mp4'}
+                .get(suffix, 'text/html; charset=utf-8'))
     result = requests.Response()
     result.status_code, result.url = status, url
     result.headers.update(hdr)
@@ -81,7 +83,7 @@ def native(tmp_path, monkeypatch):
             return response(request.url, *value)
         if request.url == probe.NAV:
             body = json.dumps({'code': 0, 'data': {'isLogin': True, 'mid': 1}}).encode()
-        elif request.url == probe.PAGE:
+        elif request.url == state.get('page', probe.PAGE):
             body = ('window.__INITIAL_STATE__=' + json.dumps(state['article']) + ';').encode()
         elif request.url in state['media']:
             body = state['media'][request.url]
@@ -97,7 +99,8 @@ def native(tmp_path, monkeypatch):
 
 def run(state, verifier=None):
     return probe.execute(state['directory'], state['baseline'], state['jar'],
-                         verifier or (lambda path, deadline: {'decode': 'PASS'}), guard=state['guard'])
+                         verifier or (lambda path, deadline: {'decode': 'PASS'}), guard=state['guard'],
+                         sample=state.get('sample', 'images'))
 
 
 def test_normal_actual_upstream_and_request_semantics_unchanged(native, tmp_path):
@@ -430,7 +433,8 @@ def test_changed_fingerprint_prevents_cookie_access(monkeypatch, tmp_path, capsy
     assert result['stop_reason'] == 'preflight_fingerprint_changed' and result['network_requests'] == 0
 
 
-def test_parent_timeout_closes_job_and_reports_unknown_count(monkeypatch, tmp_path):
+@pytest.mark.parametrize('sample', ['images', 'livephoto'])
+def test_parent_timeout_closes_job_and_reports_unknown_count(monkeypatch, tmp_path, sample):
     from types import SimpleNamespace
     state = {'closed': 0, 'calls': 0}
     class Job:
@@ -440,6 +444,7 @@ def test_parent_timeout_closes_job_and_reports_unknown_count(monkeypatch, tmp_pa
         returncode = 0
         def __init__(self, *args, **kwargs):
             assert kwargs['stderr'] == probe.subprocess.DEVNULL
+            assert args[0][-2:] == ['--sample', sample]
         def communicate(self, *args, **kwargs):
             state['calls'] += 1
             if state['calls'] == 1:
@@ -450,6 +455,231 @@ def test_parent_timeout_closes_job_and_reports_unknown_count(monkeypatch, tmp_pa
     monkeypatch.setattr(probe.legacy, 'WindowsJob', Job)
     monkeypatch.setattr(probe.subprocess, 'Popen', Process)
     result = probe.bounded(SimpleNamespace(profile='unused', baseline_report=tmp_path / 'baseline',
-                                          ffmpeg=tmp_path / 'ffmpeg.exe', output=tmp_path / 'out'), {})
+                                          ffmpeg=tmp_path / 'ffmpeg.exe', output=tmp_path / 'out', sample=sample), {})
     assert result['stop_reason'] == 'worker_total_timeout'
     assert result['network_requests'] is None and state['closed'] >= 1
+
+
+@pytest.fixture
+def live(native):
+    sample = probe.SAMPLES['livephoto']
+    native.update(sample='livephoto', page=sample.page)
+    native['article']['id'] = sample.dynamic_id
+    pics, urls, assets = [], [], []
+    native['media'] = {}
+    for i in range(1, 10):
+        jpg = f'https://i0.hdslb.com/bfs/{i}.jpg?token={SECRET}'
+        mp4 = f'https://upos-test.bilivideo.com/upgcxcode/{i}.mp4?token={SECRET}'
+        pics.append({'url': jpg, 'live_url': mp4})
+        for url, suffix, ext, body in ((jpg, '', 'jpg', b'\xff\xd8\xff\xe0SYNTHETIC_JPG'),
+                                      (mp4, 'l', 'mp4', b'\x00\x00\x00\x18ftypisomSYNTHETIC_MP4')):
+            urls.append(url)
+            assets.append(probe.media_descriptor(url, {'num': i, 'suffix': suffix, 'extension': ext}, sample))
+            native['media'][url] = body
+    native['article']['detail']['modules'][1]['module_content']['paragraphs'][0]['pic']['pics'] = pics
+    native['urls'] = urls
+    native['baseline']['assets'] = assets
+    native['guard'] = probe.Guard(sample='livephoto', clock=native['time'].clock, sleep=native['time'].sleep)
+    return native
+
+
+def test_live_native_order_pairs_and_unmodified_request_semantics(live, tmp_path):
+    from gallery_dl import job
+    from gallery_dl.extractor.bilibili import BilibiliArticleExtractor
+    report = run(live)
+    assert report['status'] == 'PASS', report
+    assert report['schema_version'] == 2 and report['sample_kind'] == 'livephoto'
+    assert report['network_requests'] == 20 and report['media_requests'] == 18
+    assert [(a['sequence'], a['suffix'], a['format']) for a in report['assets']] == [
+        (i, suffix, ext) for i in range(1, 10) for suffix, ext in (('', 'jpg'), ('l', 'mp4'))]
+    assert all(pair['status'] == 'PASS' for pair in report['pairs']) and len(report['pairs']) == 9
+    assert [c['at'] for c in live['calls']] == list(range(20))
+    assert [p.name for p in sorted(live['directory'].iterdir())] == [
+        f'{i:02}{suffix}.{ext}' for i in range(1, 10) for suffix, ext in (('', 'jpg'), ('l', 'mp4'))]
+    assert [a['sha256'] for a in report['assets']] == [hashlib.sha256(v).hexdigest() for v in live['media'].values()]
+    observed = copy.deepcopy(live['calls'])
+    live['calls'].clear()
+    with probe.native_configuration(tmp_path / 'plain-live', probe.SAMPLES['livephoto']):
+        extractor = BilibiliArticleExtractor.from_url(live['page'])
+        extractor.initialize()
+        extractor.session.cookies.update(live['jar'])
+        assert extractor.request(probe.NAV).json()['code'] == 0
+        task = job.DownloadJob(extractor)
+        task.run()
+        assert task.status == 0
+        extractor.session.close()
+    for guarded, plain in zip(observed, live['calls'], strict=True):
+        assert {k: v for k, v in guarded.items() if k != 'at'} == {k: v for k, v in plain.items() if k != 'at'}
+
+
+@pytest.mark.parametrize('position', [0, 1, 2, 3, 7, 19])
+@pytest.mark.parametrize('status', [301, 404, 412, 429])
+def test_live_http_first_failure_stops_and_keeps_pair_states(live, position, status):
+    url = [probe.NAV, live['page'], *live['urls']][position]
+    live['responses'][url] = (SECRET.encode(), status, [('Location', 'https://unknown.invalid/' + SECRET)])
+    report = run(live)
+    assert report['status'] == 'BLOCKED' and len(live['calls']) == position + 1
+    assert report['stop_reason'] == ('redirect_rejected' if status == 301 else 'http_status_stop')
+    passed = max(0, (position - 2) // 2)
+    assert sum(p['status'] == 'PASS' for p in report['pairs']) == passed
+    if position >= 2:
+        assert report['pairs'][(position - 2) // 2]['status'] == 'INCOMPLETE'
+    assert SECRET not in json.dumps(report)
+
+
+@pytest.mark.parametrize('change', ['missing', 'swap_video', 'reverse', 'duplicate', 'missing_picture',
+                                   'author', 'id', 'format', 'blocked', 'blocked_overwrite'])
+def test_live_manifest_changes_stop_before_any_media(live, change):
+    modules = live['article']['detail']['modules']
+    pics = modules[1]['module_content']['paragraphs'][0]['pic']['pics']
+    if change == 'missing': del pics[-1]['live_url']
+    if change == 'swap_video': pics[0]['live_url'], pics[1]['live_url'] = pics[1]['live_url'], pics[0]['live_url']
+    if change == 'reverse': pics.reverse()
+    if change == 'duplicate': pics[1] = pics[0].copy()
+    if change == 'missing_picture': pics.pop()
+    if change == 'author': modules[0]['module_author']['mid'] = 42
+    if change == 'id': live['article']['id'] = '42'
+    if change == 'format': pics[0]['live_url'] = pics[0]['live_url'].replace('.mp4', '.webm')
+    if change == 'blocked': modules[1]['module_blocked'] = {'hint_message': SECRET}
+    if change == 'blocked_overwrite': modules[0]['module_blocked'] = {'hint_message': SECRET}
+    report = run(live)
+    assert report['status'] == 'BLOCKED' and len(live['calls']) == 2, report
+    assert report['media_requests'] == 0 and not list(live['directory'].iterdir())
+    assert all(p['status'] == 'NOT_STARTED' for p in report['pairs'])
+
+
+def test_live_request_21_never_reaches_transport(live):
+    assert run(live)['status'] == 'PASS'
+    session = requests.Session()
+    live['guard'].install(session)
+    try:
+        with pytest.raises(probe.Stop, match='request_budget_exhausted'): session.get(probe.NAV, timeout=15)
+        assert len(live['calls']) == 20
+    finally:
+        live['guard'].close(); session.close()
+
+
+@pytest.mark.parametrize('reason', sorted(probe.LOCAL_FAILURES) + [SECRET])
+def test_live_local_failure_whitelist_and_pair_incomplete(live, reason, capsys, caplog):
+    def verifier(path, deadline):
+        if path.suffix == '.mp4': raise probe.legacy.ProbeStop(reason, {'unsafe': SECRET})
+        return {'decode': 'PASS'}
+    with caplog.at_level(logging.DEBUG): report = run(live, verifier)
+    expected = reason if reason in probe.LOCAL_FAILURES else 'local_verification_failed'
+    assert report['stop_reason'] == expected and report['assets'][-1]['failure_reason'] == expected
+    assert report['assets'][0]['download'] == 'PASS' and report['assets'][1]['decode'] == 'FAIL'
+    assert len(live['calls']) == 4 and report['pairs'][0]['status'] == 'INCOMPLETE'
+    assert all(p['status'] == 'NOT_STARTED' for p in report['pairs'][1:])
+    assert (live['directory'] / '01l.mp4').exists()
+    captured = capsys.readouterr()
+    assert SECRET not in json.dumps(report) + captured.out + captured.err + caplog.text
+
+
+@pytest.mark.parametrize('case', ['risk', 'gzip_risk', 'video_cookie', 'video_encoding', 'video_limit',
+                                 'total_limit', 'timeout', 'video_partial'])
+def test_live_failure_guards(live, monkeypatch, case):
+    video = live['urls'][1]
+    if case in ('risk', 'gzip_risk'):
+        body = b'window.__riskdata__ = {}'
+        live['responses'][live['page']] = (gzip.compress(body) if case == 'gzip_risk' else body, 200,
+                                          [('Content-Encoding', 'gzip')] if case == 'gzip_risk' else [])
+    if case == 'video_cookie': live['jar'].set('secret', SECRET, domain='.bilivideo.com', path='/')
+    if case == 'video_encoding': live['responses'][video] = (gzip.compress(live['media'][video]), 200, [('Content-Encoding', 'gzip')])
+    if case == 'video_limit': live['responses'][video] = (b'x', 200, [('Content-Length', str(probe.ASSET_LIMIT + 1))])
+    if case == 'total_limit': monkeypatch.setattr(probe, 'TOTAL_LIMIT', len(live['media'][live['urls'][0]]) + 1)
+    if case == 'timeout': live['responses'][video] = requests.Timeout(SECRET)
+    if case == 'video_partial':
+        live['media'][video] += b'x' * 100000
+        monkeypatch.setattr(probe, 'ASSET_LIMIT', 40000)
+    report = run(live)
+    expected_count = 2 if case in ('risk', 'gzip_risk') else 3 if case == 'video_cookie' else 4
+    assert report['status'] == 'BLOCKED' and len(live['calls']) == expected_count, report
+    if case == 'video_partial':
+        assert (live['directory'] / '01l.mp4.part').exists()
+        assert not (live['directory'] / '01l.mp4').exists()
+
+
+@pytest.mark.parametrize('host', ['bilivideo.com.evil.invalid', 'evilbilivideo.com', '-bad.bilivideo.com',
+                                 'bad_.bilivideo.cn', '127.0.0.1', 'bilivideo.com'])
+def test_live_video_host_boundaries(host):
+    with pytest.raises(probe.Stop):
+        probe.media_descriptor(f'https://{host}/path/1.mp4', {'num': 1, 'suffix': 'l', 'extension': 'mp4'},
+                               probe.SAMPLES['livephoto'])
+
+
+@pytest.mark.parametrize('scheme,host', [('http', 'upos-test.bilivideo.com'), ('https', 'upos-test.bilivideo.cn'),
+                                       ('https', 'i1.hdslb.com')])
+def test_live_original_video_endpoints_allowed(scheme, host):
+    row = probe.media_descriptor(f'{scheme}://{host}/path/1.mp4?token={SECRET}',
+                                 {'num': 1, 'suffix': 'l', 'extension': 'mp4'}, probe.SAMPLES['livephoto'])
+    assert row['format'] == 'mp4' and row['suffix'] == 'l' and SECRET not in json.dumps(row)
+
+
+def test_live_baseline_fingerprint_is_fixed(monkeypatch, tmp_path):
+    monkeypatch.setattr(probe.legacy, 'load_baseline', lambda *args: {'sha256': '0' * 64})
+    with pytest.raises(probe.Stop, match='fixed_baseline_fingerprint_mismatch'):
+        probe.load_baseline(tmp_path / 'synthetic.json', probe.SAMPLES['livephoto'])
+    monkeypatch.setattr(probe.legacy, 'load_baseline', lambda *args: {'sha256': probe.LIVE_BASELINE_SHA256})
+    assert probe.load_baseline(tmp_path / 'synthetic.json', probe.SAMPLES['livephoto'])['sha256'] == probe.LIVE_BASELINE_SHA256
+
+
+def test_live_sample_mismatch_cannot_use_images_guard(live):
+    live['guard'] = probe.Guard()
+    assert run(live)['stop_reason'] == 'guard_sample_mismatch' and not live['calls']
+
+
+def test_worker_sample_mismatch_prevents_cookie_read(monkeypatch, tmp_path, capsys):
+    registry = {'fingerprints': {}, 'sample_kind': 'images', 'sample': probe.SAMPLE, 'request_limit': 6}
+    monkeypatch.setattr(sys, 'stdin', io.StringIO(probe.START + json.dumps(registry) + '\n'))
+    monkeypatch.setattr(probe, 'fingerprints', lambda *args: {})
+    monkeypatch.setattr(probe, 'load_bili_cookies', lambda *args: pytest.fail('no cookie read permitted'))
+    assert probe.main(['--worker', '--sample', 'livephoto', '--profile', 'unused', '--baseline-report', str(tmp_path / 'b'),
+                       '--ffmpeg', str(tmp_path / 'f'), '--output', str(tmp_path / 'o')]) == 0
+    report = json.loads(capsys.readouterr().out)
+    assert report['stop_reason'] == 'preregistration_sample_mismatch' and report['network_requests'] == 0
+
+
+@pytest.fixture(scope='module')
+def real_live_media(tmp_path_factory):
+    import subprocess
+    binary = os.environ.get('BILI_TEST_FFMPEG')
+    if not binary: pytest.skip('Set BILI_TEST_FFMPEG for actual synthetic livephoto verification')
+    ffmpeg, ffprobe = probe.legacy.check_ffmpeg(Path(binary))
+    root = tmp_path_factory.mktemp('real-live-fixture')
+    output = {'ffmpeg': ffmpeg, 'ffprobe': ffprobe}
+    for name, frames, size in [('photo.jpg', 1, '48x32'), ('video.mp4', 3, '32x24'), ('oneframe.mp4', 1, '32x24')]:
+        target = root / name
+        command = [str(ffmpeg), '-nostdin', '-v', 'error', '-f', 'lavfi', '-i', f'testsrc=size={size}:rate=3',
+                   '-frames:v', str(frames), '-an']
+        command += ['-c:v', 'libx264', '-pix_fmt', 'yuv420p'] if name.endswith('.mp4') else ['-update', '1']
+        result = subprocess.run([*command, str(target)], stdout=subprocess.PIPE, stderr=subprocess.DEVNULL, timeout=20,
+                                creationflags=getattr(subprocess, 'CREATE_NO_WINDOW', 0))
+        assert result.returncode == 0
+        output[name] = target.read_bytes()
+    return output
+
+
+@pytest.mark.parametrize('variant', ['valid', 'oneframe', 'truncated', 'corrupt', 'disguised'])
+def test_live_actual_ffmpeg_complete_pipeline(live, real_live_media, variant):
+    import time
+    media = real_live_media
+    for i, url in enumerate(live['urls']):
+        live['media'][url] = media['photo.jpg'] if i % 2 == 0 else media['video.mp4']
+    video = live['urls'][1]
+    if variant == 'oneframe': live['media'][video] = media['oneframe.mp4']
+    if variant == 'truncated': live['media'][video] = media['video.mp4'][:len(media['video.mp4']) // 2]
+    if variant == 'corrupt': live['media'][video] = b'\x00' * len(media['video.mp4'])
+    if variant == 'disguised': live['media'][video] = media['photo.jpg']
+    report = run(live, lambda path, deadline: probe.legacy.inspect_asset(path, path.suffix[1:],
+                 media['ffmpeg'], media['ffprobe'], time.monotonic() + 20))
+    if variant == 'valid':
+        assert report['status'] == 'PASS', report
+        assert all(p['status'] == 'PASS' for p in report['pairs'])
+        for picture, clip in zip(report['assets'][::2], report['assets'][1::2], strict=True):
+            assert picture['streams'][0]['width'] == 48 and clip['streams'][0]['width'] == 32
+            assert clip['decoded_frames'] == 3 and clip['duration_seconds'] > 0
+            assert len(clip['streams']) == 1 and clip['streams'][0]['codec_type'] == 'video'
+    else:
+        assert report['status'] == 'BLOCKED' and len(live['calls']) == 4, report
+        assert report['pairs'][0]['status'] == 'INCOMPLETE'
+        if variant == 'oneframe': assert report['stop_reason'] == 'insufficient_decoded_frames'

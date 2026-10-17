@@ -1,4 +1,4 @@
-"""Fixed four-PNG research spike around gallery-dl's unchanged native pipeline.
+"""Fixed image/livephoto research spike around gallery-dl's native pipeline.
 
 No product imports this module. Transport observers call the original adapter,
 raw readers and decoder; the upstream job owns filenames, .part and publication.
@@ -8,6 +8,7 @@ from __future__ import annotations
 import argparse
 import contextlib
 import copy
+from dataclasses import dataclass
 from datetime import datetime, timezone
 import hashlib
 import importlib.metadata
@@ -40,6 +41,56 @@ SOURCE_FILES = ('experiments/gallery_native_probe.py', 'experiments/gallery_down
                 'experiments/gallery_page_probe.py', 'experiments/video_download_probe.py',
                 'experiments/research_probe.py', 'experiments/gallery_probe.py',
                 'tests/test_gallery_native_probe.py', 'requirements-research.lock.txt')
+LIVE_BASELINE_SHA256 = 'a98aaf48db64d4c85bc5baeaf7ccc59a0c609d699d60b34cdcc345ded8dd3b5b'
+LOCAL_FAILURES = frozenset({
+    'worker_total_timeout', 'local_probe_failed', 'invalid_local_streams', 'unexpected_local_codec',
+    'invalid_local_dimensions', 'original_format_mismatch', 'local_decode_failed',
+    'local_decode_summary_limit', 'local_decode_summary_missing', 'insufficient_decoded_frames',
+    'missing_video_duration', 'local_decode_or_probe_timeout', 'local_validation_error',
+})
+
+
+@dataclass(frozen=True)
+class Sample:
+    kind: str
+    dynamic_id: str
+    images: int
+    image_format: str
+    live: bool
+
+    @property
+    def page(self):
+        return 'https://www.bilibili.com/opus/' + self.dynamic_id
+
+    @property
+    def assets(self):
+        return self.images * (2 if self.live else 1)
+
+    @property
+    def requests(self):
+        return 2 + self.assets
+
+    @property
+    def experiment(self):
+        return 'NATIVE_LIVEPHOTO_01' if self.live else 'NATIVE_GALLERY_01'
+
+
+SAMPLES = {'images': Sample('images', SAMPLE, 4, 'png', False),
+           'livephoto': Sample('livephoto', '1257912749013336118', 9, 'jpg', True)}
+
+
+def selected_sample(kind):
+    try:
+        return SAMPLES[kind]
+    except (KeyError, TypeError):
+        raise Stop('sample_not_preregistered') from None
+
+
+def load_baseline(path, sample):
+    baseline = legacy.load_baseline(path, sample.dynamic_id)
+    if sample.live and baseline['sha256'] != LIVE_BASELINE_SHA256:
+        raise Stop('fixed_baseline_fingerprint_mismatch')
+    return baseline
 
 
 class Stop(BaseException):
@@ -54,27 +105,36 @@ def digest(path):
         return hashlib.file_digest(f, 'sha256').hexdigest()
 
 
-def media_descriptor(url, metadata):
+def media_descriptor(url, metadata, sample=SAMPLES['images']):
     """Preserve original HTTP/HTTPS URLs; never upgrade or invent an endpoint."""
     try:
         if not isinstance(url, str) or len(url) > 8192 or any(ord(c) < 33 for c in url):
             raise ValueError
         p = urlsplit(url)
-        if (p.scheme not in ('http', 'https') or p.hostname not in legacy.CDN_HOSTS
+        extension, suffix = metadata.get('extension'), metadata.get('suffix')
+        video = sample.live and suffix == 'l' and extension == 'mp4'
+        host = p.hostname or ''
+        video_host = (video and any(host.endswith('.' + ending) for ending in legacy.VIDEO_CDN_SUFFIXES)
+                      and all(re.fullmatch(r'[a-z0-9](?:[a-z0-9-]{0,61}[a-z0-9])?', label)
+                              for label in host.split('.')))
+        if (p.scheme not in ('http', 'https') or not (host in legacy.CDN_HOSTS or video_host)
                 or p.username is not None or p.password is not None or p.fragment
                 or p.port not in (None, 80 if p.scheme == 'http' else 443)
-                or not p.path.startswith('/bfs/') or not p.path.endswith('.png')):
+                or (not video and not p.path.startswith('/bfs/'))
+                or not p.path.endswith('.mp4' if video else '.' + sample.image_format)):
             raise ValueError
-        if type(metadata.get('num')) is not int or metadata.get('suffix') != '' or metadata.get('extension') != 'png':
+        if (type(metadata.get('num')) is not int or not 1 <= metadata['num'] <= sample.images
+                or not (video or (suffix == '' and extension == sample.image_format))):
             raise ValueError
-        return {'sequence': metadata['num'], 'suffix': '', 'format': 'png',
+        return {'sequence': metadata['num'], 'suffix': suffix, 'format': extension,
                 'source_path_sha256': hashlib.sha256(p.path.encode()).hexdigest()}
     except (ValueError, TypeError, AttributeError):
         raise Stop('media_endpoint_or_format_rejected') from None
 
 
 class Guard:
-    def __init__(self, *, clock=time.monotonic, sleep=time.sleep):
+    def __init__(self, *, sample='images', clock=time.monotonic, sleep=time.sleep):
+        self.sample = selected_sample(sample)
         self.clock, self.sleep = clock, sleep
         self.started = clock()
         self.deadline = self.started + WORKER_SECONDS
@@ -105,10 +165,10 @@ class Guard:
             self.stop('unexpected_request_method_or_body')
         if self.count == 0 and request.url == NAV:
             return 'account'
-        if self.count == 1 and self.account_ok and request.url == PAGE:
+        if self.count == 1 and self.account_ok and request.url == self.sample.page:
             return 'page'
-        if (self.account_ok and len(self.allowed) == 4 and self.count >= 2
-                and self.media_count < 4 and request.url == self.allowed[self.media_count]):
+        if (self.account_ok and len(self.allowed) == self.sample.assets and self.count >= 2
+                and self.media_count < self.sample.assets and request.url == self.allowed[self.media_count]):
             if any(name.lower() in ('cookie', 'authorization', 'proxy-authorization') for name in request.headers):
                 self.stop('media_sensitive_header_rejected')
             return 'media'
@@ -124,7 +184,7 @@ class Guard:
 
             def send(request, *args, _original=original, **kwargs):
                 self.remaining()
-                if self.count >= REQUEST_LIMIT:
+                if self.count >= self.sample.requests:
                     self.stop('request_budget_exhausted')
                 kind = self.kind(request)
                 timeout = kwargs.get('timeout')
@@ -178,6 +238,9 @@ class Guard:
         raw_hash, decoded_hash = hashlib.sha256(), hashlib.sha256()
         raw_body = bytearray()
         prefix = bytearray()
+        # The selected manifest is already validated before any media dispatch.
+        signature = (b'\x89PNG\r\n\x1a\n' if not self.sample.live else
+                     b'\xff\xd8\xff' if self.media_count % 2 == 1 else None)
         tail = b''
         event.update(raw_bytes=0, decoded_bytes=0, complete=False)
 
@@ -223,9 +286,10 @@ class Guard:
                         self.total_media += len(data)
                         if self.total_media > TOTAL_LIMIT:
                             self.stop('sample_byte_limit')
-                        prefix.extend(data[:max(0, 8 - len(prefix))])
-                        if len(prefix) == 8 and prefix != b'\x89PNG\r\n\x1a\n':
-                            self.stop('media_signature_rejected')
+                        if signature is not None:
+                            prefix.extend(data[:max(0, len(signature) - len(prefix))])
+                            if len(prefix) == len(signature) and prefix != signature:
+                                self.stop('media_signature_rejected')
                     else:
                         scan = tail + data
                         if b'window._riskdata_' in scan or b'window.__riskdata__' in scan:
@@ -269,16 +333,18 @@ class Guard:
 
 
 @contextlib.contextmanager
-def native_configuration(directory):
+def native_configuration(directory, sample=SAMPLES['images']):
     from gallery_dl import config
     previous = copy.deepcopy(config._config)
     logging_level = logging.root.manager.disable
     config.clear()  # Embedded API does not load user's gallery-dl config files.
-    for key, value in {'base-directory': str(directory), 'directory': [], 'filename': '{num:02}.png',
+    for key, value in {'base-directory': str(directory), 'directory': [], 'filename': '{num:02}{suffix}.{extension}',
                        'retries': 0, 'timeout': 15, 'sleep-request': 0, 'sleep': 0,
                        'fallback': False, 'postprocessors': [], 'skip': True, 'input': False,
                        'write-pages': False, 'metadata-url': None, 'archive': None}.items():
         config.set(('extractor',), key, value)
+    if sample.live:
+        config.set(('extractor', 'bilibili'), 'livephoto', True)
     for key, value in {'retries': 0, 'timeout': 15, 'adjust-extensions': False,
                        'part': True, 'progress': 0, 'consume-content': False}.items():
         config.set(('downloader',), key, value)
@@ -293,8 +359,8 @@ def native_configuration(directory):
         config._config.update(previous)
 
 
-def validate_article(article, report):
-    if not isinstance(article, dict) or type(article.get('id')) not in (str, int) or str(article['id']) != SAMPLE:
+def validate_article(article, report, sample=SAMPLES['images']):
+    if not isinstance(article, dict) or type(article.get('id')) not in (str, int) or str(article['id']) != sample.dynamic_id:
         raise Stop('work_identity_mismatch')
     structure = original_modules(article)
     report['original_modules'] = structure
@@ -314,48 +380,56 @@ def validate_article(article, report):
 def validated_messages(extractor, guard, baseline, report):
     from gallery_dl.extractor.common import Message
     original = extractor.items
+    sample = guard.sample
 
     def messages():
         buffered, rows, urls = [], [], []
         for kind, url, data in original():
-            if len(buffered) >= 5 or not isinstance(data, dict):
+            if len(buffered) >= sample.assets + 1 or not isinstance(data, dict):
                 raise Stop('message_contract_changed')
             data = copy.deepcopy(data)  # Upstream mutates the same dict for each picture.
-            if (str(data.get('id')) != SAMPLE or str(data.get('user_id')) != legacy.AUTHOR_UID
+            if (str(data.get('id')) != sample.dynamic_id or str(data.get('user_id')) != legacy.AUTHOR_UID
                     or any(k.startswith('_http') for k in data)):
                 raise Stop('message_identity_or_control_mismatch')
             if kind == Message.Directory and not buffered:
-                if data.get('count') != 4 or type(data.get('count')) is not int:
+                if data.get('count') != sample.images or type(data.get('count')) is not int:
                     raise Stop('image_count_mismatch')
             elif kind == Message.Url and buffered:
-                rows.append(media_descriptor(url, data))
+                rows.append(media_descriptor(url, data, sample))
                 urls.append(url)
             else:
                 raise Stop('message_contract_changed')
             buffered.append((kind, url, data))
-        if (len(buffered) != 5 or len(set(urls)) != 4 or rows != baseline['assets']
+        if (len(buffered) != sample.assets + 1 or len(set(urls)) != sample.assets or rows != baseline['assets']
                 or baseline['author_uid'] != legacy.AUTHOR_UID):
             raise Stop('fixed_sample_baseline_mismatch')
         guard.allowed = urls
-        report.update(baseline_match='PASS', author_uid=legacy.AUTHOR_UID, declared_images=4)
+        report.update(baseline_match='PASS', author_uid=legacy.AUTHOR_UID, declared_images=sample.images)
         yield from buffered
     extractor.items = messages
 
 
-def execute(directory, baseline, jar, verifier, *, guard=None):
+def execute(directory, baseline, jar, verifier, *, guard=None, sample='images'):
     """Run a whole native job once. verifier is local-only and precedes next URL."""
     from gallery_dl import job
     from gallery_dl.extractor.bilibili import BilibiliArticleExtractor
-    guard = guard or Guard()
-    report = {'experiment': 'NATIVE_GALLERY_01', 'sample_dynamic_id': SAMPLE,
+    guard = guard or Guard(sample=sample)
+    sample = selected_sample(sample)
+    report = {'schema_version': 2, 'experiment': sample.experiment, 'sample_kind': sample.kind,
+              'sample_dynamic_id': sample.dynamic_id,
               'status': 'RUNNING', 'assets': [], 'baseline_match': 'NOT_CHECKED',
-              'research_gate': 'NEEDS_MORE_EVIDENCE', 'manual_image_preview': 'NOT_TESTED'}
+              'research_gate': 'NEEDS_MORE_EVIDENCE', 'manual_image_preview': 'NOT_TESTED',
+              'manual_live_playback': 'NOT_TESTED',
+              'pairs': [{'sequence': i, 'status': 'NOT_STARTED', 'image_filename': f'{i:02}.jpg',
+                         'video_filename': f'{i:02}l.mp4'} for i in range(1, sample.images + 1)] if sample.live else []}
     extractor = None
-    with native_configuration(directory):
+    with native_configuration(directory, sample):
         try:
+            if guard.sample != sample:
+                raise Stop('guard_sample_mismatch')
             if any(directory.iterdir()):
                 raise Stop('output_directory_not_empty')
-            extractor = BilibiliArticleExtractor.from_url(PAGE)
+            extractor = BilibiliArticleExtractor.from_url(sample.page)
             extractor.initialize()
             extractor.session.cookies.update(jar)
             guard.install(extractor.session)
@@ -371,7 +445,7 @@ def execute(directory, baseline, jar, verifier, *, guard=None):
 
             original_request = extractor.request
             def request(url, *args, **kwargs):
-                if url != PAGE:
+                if url != sample.page:
                     raise Stop('unexpected_source_endpoint')
                 response = original_request(url, *args, **kwargs)
                 try:
@@ -387,15 +461,19 @@ def execute(directory, baseline, jar, verifier, *, guard=None):
             original_article = extractor.api.article
             def article(article_id):
                 value = original_article(article_id)
-                validate_article(value, report)
+                validate_article(value, report, sample)
                 return value
             extractor.api.article = article
             validated_messages(extractor, guard, baseline, report)
 
             class WholeTaskJob(job.DownloadJob):
                 def handle_url(self, url, data):
-                    row = {**media_descriptor(url, data), 'filename': f"{data['num']:02}.png", 'download': 'IN_PROGRESS'}
+                    row = {**media_descriptor(url, data, sample),
+                           'filename': f"{data['num']:02}{data['suffix']}.{data['extension']}",
+                           'pair_role': 'live_video' if data['suffix'] == 'l' else 'image', 'download': 'IN_PROGRESS'}
                     report['assets'].append(row)
+                    if sample.live:
+                        report['pairs'][row['sequence'] - 1]['status'] = 'INCOMPLETE'
                     super().handle_url(url, data)
                     if self.status:
                         guard.stop('native_download_failed')
@@ -410,16 +488,26 @@ def execute(directory, baseline, jar, verifier, *, guard=None):
                     row.update(size=path.stat().st_size, sha256=digest(path), download='COMPLETE_NOT_DECODED')
                     try:
                         row.update(verifier(path, guard.deadline))
+                    except legacy.ProbeStop as exc:
+                        reason = exc.reason if exc.reason in LOCAL_FAILURES else 'local_verification_failed'
+                        row.update(decode='FAIL', failure_reason=reason)
+                        guard.stop(reason)
                     except Exception:
+                        row.update(decode='FAIL', failure_reason='local_verification_failed')
                         guard.stop('local_verification_failed')
                     if row.get('decode') != 'PASS':
                         guard.stop('local_decode_failed')
                     row['download'] = 'PASS'
+                    if sample.live and row['pair_role'] == 'live_video':
+                        paired = [a for a in report['assets'] if a['sequence'] == row['sequence']]
+                        if len(paired) == 2 and all(a['download'] == 'PASS' for a in paired):
+                            report['pairs'][row['sequence'] - 1]['status'] = 'PASS'
 
             task = WholeTaskJob(extractor)
             task.run()
-            if (task.status or len(report['assets']) != 4 or guard.count != 6
-                    or any(row['download'] != 'PASS' for row in report['assets'])):
+            if (task.status or len(report['assets']) != sample.assets or guard.count != sample.requests
+                    or any(row['download'] != 'PASS' for row in report['assets'])
+                    or any(pair['status'] != 'PASS' for pair in report['pairs'])):
                 raise Stop('native_job_incomplete')
             report['status'] = 'PASS'
         except Stop as exc:
@@ -469,6 +557,7 @@ def bounded(args, registry):
     try:
         command = [sys.executable, str(Path(__file__).resolve()), '--worker', '--profile', args.profile,
                    '--baseline-report', str(args.baseline_report), '--ffmpeg', str(args.ffmpeg), '--output', str(args.output)]
+        command.extend(['--sample', getattr(args, 'sample', 'images')])
         process = subprocess.Popen(command, stdin=subprocess.PIPE, stdout=subprocess.PIPE, stderr=subprocess.DEVNULL,
                                    text=True, encoding='utf-8', creationflags=getattr(subprocess, 'CREATE_NO_WINDOW', 0))
         job.assign(process)
@@ -498,8 +587,10 @@ def main(argv=None):
     parser.add_argument('--baseline-report', type=Path, required=True)
     parser.add_argument('--ffmpeg', type=Path, required=True)
     parser.add_argument('--output', type=Path, required=True)
+    parser.add_argument('--sample', choices=tuple(SAMPLES), default='images')
     parser.add_argument('--worker', action='store_true', help=argparse.SUPPRESS)
     args = parser.parse_args(argv)
+    sample = selected_sample(args.sample)
     if args.worker:
         if sys.stdin.readline() != START:
             return 2
@@ -509,12 +600,16 @@ def main(argv=None):
                 registry = json.loads(sys.stdin.readline(128 * 1024))
                 if fingerprints(args.ffmpeg, args.baseline_report) != registry['fingerprints']:
                     raise Stop('preflight_fingerprint_changed')
+                if (registry.get('sample_kind') != sample.kind or registry.get('sample') != sample.dynamic_id
+                        or registry.get('request_limit') != sample.requests):
+                    raise Stop('preregistration_sample_mismatch')
                 output = paths(args.output)
-                baseline = legacy.load_baseline(args.baseline_report, SAMPLE)
+                baseline = load_baseline(args.baseline_report, sample)
                 ffmpeg, ffprobe = legacy.check_ffmpeg(args.ffmpeg)
                 jar, _ = load_bili_cookies(args.profile, None)
                 result = execute(output / 'media', baseline, jar,
-                                 lambda path, deadline: legacy.inspect_asset(path, 'png', ffmpeg, ffprobe, deadline))
+                                 lambda path, deadline: legacy.inspect_asset(path, path.suffix[1:], ffmpeg, ffprobe, deadline),
+                                 sample=sample.kind)
             except Stop as exc:
                 result['stop_reason'] = exc.reason
             except Exception:
@@ -523,14 +618,17 @@ def main(argv=None):
         return 0
     try:
         args.output = paths(args.output)
-        legacy.load_baseline(args.baseline_report, SAMPLE)
+        load_baseline(args.baseline_report, sample)
         args.ffmpeg, _ = legacy.check_ffmpeg(args.ffmpeg)
-        registry = {'experiment': 'NATIVE_GALLERY_01', 'registered_utc': datetime.now(timezone.utc).isoformat(),
-                    'sample': SAMPLE, 'author_uid': legacy.AUTHOR_UID, 'expected_images': 4,
-                    'request_limit': REQUEST_LIMIT, 'retries': 0, 'redirects': 0, 'worker_seconds': WORKER_SECONDS,
+        registry = {'experiment': sample.experiment, 'sample_kind': sample.kind,
+                    'registered_utc': datetime.now(timezone.utc).isoformat(),
+                    'sample': sample.dynamic_id, 'author_uid': legacy.AUTHOR_UID, 'expected_images': sample.images,
+                    'expected_assets': sample.assets,
+                    'request_limit': sample.requests, 'retries': 0, 'redirects': 0, 'worker_seconds': WORKER_SECONDS,
                     'network_wait_seconds': 15, 'interval_seconds': 1, 'max_asset_bytes': ASSET_LIMIT,
                     'max_total_bytes': TOTAL_LIMIT, 'max_raw_and_decoded_page_bytes': PAGE_LIMIT,
                     'media_schemes': ['http', 'https'], 'media_hosts': sorted(legacy.CDN_HOSTS),
+                    'video_cdn_subdomains': list(legacy.VIDEO_CDN_SUFFIXES) if sample.live else [],
                     'fingerprints': fingerprints(args.ffmpeg, args.baseline_report)}
         args.output.mkdir(exist_ok=False)
         (args.output / 'media').mkdir()
@@ -538,7 +636,8 @@ def main(argv=None):
             json.dump(registry, f, indent=2)
     except (Exception, Stop):
         parser.error('Requires pinned dependencies, valid baseline/tools and a new direct .artifacts/gallery-native-NAME directory')
-    report = {'schema_version': 1, 'status': 'RUNNING', 'registration_sha256': digest(args.output / 'registration.json'),
+    report = {'schema_version': 2, 'sample_kind': sample.kind, 'status': 'RUNNING',
+              'registration_sha256': digest(args.output / 'registration.json'),
               'research_gate': 'NEEDS_MORE_EVIDENCE', 'credentials_persisted': False, 'raw_logs_persisted': False}
     with (args.output / 'report.json').open('x', encoding='utf-8') as f:
         json.dump(report, f); f.flush()
