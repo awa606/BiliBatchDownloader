@@ -1,0 +1,87 @@
+{
+  "schema_version": 1,
+  "status": "STOPPED",
+  "source_commit": "d93f6a1284d13f99959a5864ec0a7b79a7a16c75",
+  "registration_sha256": "841c0a6bcce5dbfedd20a693d22d87afc49687b9c102cf43f696fda9ceded26e",
+  "report_sha256": "357b0156a3074937251f238cce2e3352476caf0e8e560c060b8531406201ea5f",
+  "total_requests": 10,
+  "total_media_requests": 4,
+  "media_bytes": 11198120,
+  "stages": [
+    {
+      "sample": "1249456774436618276",
+      "phase": "prepare",
+      "status": "PASS",
+      "request_limit": 6,
+      "requests": 6,
+      "description_status": "present",
+      "description_chars": 4,
+      "description_sha256": "497fd82b1a5192a8010fd0ec77f28f831cfa6127b45642618b246cff3696b45e",
+      "tags_status": "empty",
+      "tags_count": 0,
+      "topics_count": 0,
+      "metadata_diagnostics": [],
+      "media_requests": 4,
+      "http_statuses": [
+        200,
+        200,
+        200,
+        200,
+        200,
+        200
+      ],
+      "minimum_request_start_gap_seconds": 1.000193
+    },
+    {
+      "sample": "1249456774436618276",
+      "phase": "download",
+      "status": "PASS",
+      "request_limit": 2,
+      "requests": 2,
+      "saved_groups": 2,
+      "total_groups": 4,
+      "selection_complete": true,
+      "metadata_diagnostics": [],
+      "media_requests": 0,
+      "http_statuses": [
+        200,
+        200
+      ],
+      "minimum_request_start_gap_seconds": 1.000532
+    },
+    {
+      "sample": "1257912749013336118",
+      "phase": "prepare",
+      "status": "FAIL",
+      "request_limit": 11,
+      "requests": 2,
+      "reason": "gallery_metadata_structure_unknown",
+      "metadata_diagnostics": [
+        {
+          "type": "metadata_diagnostic",
+          "schema": 1,
+          "status": "REJECTED",
+          "reason": "text_structure_unknown",
+          "field": "text",
+          "value_type": "NULL",
+          "module_index": 2,
+          "paragraph_index": 1
+        }
+      ],
+      "media_requests": 0,
+      "http_statuses": [
+        200,
+        200
+      ],
+      "minimum_request_start_gap_seconds": 1.000311
+    }
+  ],
+  "source_fingerprints_unchanged": true,
+  "timestamp_fix_real_page": "PASS",
+  "prior_four_image_page_bytes_identical": true,
+  "livephoto_download": "NOT_RUN",
+  "old_library_and_reports_unchanged": true,
+  "original_media_and_previews_checked": 43,
+  "release": "NOT_PUBLISHED",
+  "candidate_metadata_backfill": "NOT_RUN"
+}
