@@ -32,7 +32,7 @@ ColumnLayout {
     onIdentityKeyChanged: { stopPreview(); groupIndex=0; }
     Component.onDestruction: stopPreview()
 
-    component Caption: Label { color: "#7c8395"; textFormat: Text.PlainText; wrapMode: Text.Wrap }
+    component Caption: CopyLabel { color: "#7c8395"; wrapMode: Text.Wrap }
     component Action: Button {
         id: button; implicitHeight: 36
         contentItem: Text { text: button.text; color: button.enabled?"#30374a":"#9ba1ae"; font: button.font; horizontalAlignment: Text.AlignHCenter; verticalAlignment: Text.AlignVCenter }
@@ -43,9 +43,9 @@ ColumnLayout {
         Action { text: "‹ 返回作品库"; onClicked: { gallery.stopPreview(); gallery.backRequested(); } }
         Caption { Layout.fillWidth: true; horizontalAlignment: Text.AlignRight; text: "图文／图片 · "+groups.length+(work.livephoto?"组实况":"张图片") }
     }
-    Label { Layout.fillWidth: true; text: work.title || "读取作品…"; textFormat: Text.PlainText; font.pixelSize: 18; font.bold: true; color: "#232939"; elide: Text.ElideRight }
-    Caption { objectName: "galleryPublished"; Layout.fillWidth: true; text: (work.author || "作者待获取")+" · "+(work.published?new Date(work.published*1000).toLocaleString(Qt.locale("zh_CN"),"yyyy-MM-dd hh:mm:ss"):"发布时间待获取") }
-    Caption { Layout.fillWidth: true; visible: work.tags_status!=="empty"
+    SelectableBody { objectName: "galleryTitle"; Layout.fillWidth: true; Layout.preferredHeight: implicitHeight; maximumTextHeight: 52; text: work.title || "读取作品…"; fontSize: 18; fontBold: true; textColor: "#232939" }
+    SelectableBody { objectName: "galleryPublished"; Layout.fillWidth: true; Layout.preferredHeight: implicitHeight; fontSize: 13; textColor: "#7c8395"; text: (work.author || "作者待获取")+" · "+(work.published?new Date(work.published*1000).toLocaleString(Qt.locale("zh_CN"),"yyyy-MM-dd hh:mm:ss"):"发布时间待获取") }
+    SelectableBody { objectName: "galleryTags"; Layout.fillWidth: true; Layout.preferredHeight: implicitHeight; maximumTextHeight: 52; fontSize: 13; textColor: "#7c8395"; visible: work.tags_status!=="empty"
         text: work.tags_status==="present"?"标签／话题："+(work.tags || []).concat(work.topics || []).join(" · "):
               work.tags_status==="failed"?"原站标签获取失败":"原站标签待获取" }
     SelectableBody { objectName: "galleryDescription"; Layout.fillWidth: true; Layout.preferredHeight: Math.min(85,implicitHeight)

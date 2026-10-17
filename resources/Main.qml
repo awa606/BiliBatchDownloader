@@ -34,7 +34,7 @@ ApplicationWindow {
         background: Rectangle { color: "white"; radius: 9; border.color: field.activeFocus ? win.pink : "#e3e6ef" }
     }
     component Hint: SafeLabel { color: win.muted; wrapMode: Text.Wrap; font.pixelSize: 12 }
-    component SafeLabel: Label { textFormat: Text.PlainText }
+    component SafeLabel: CopyLabel {}
     component Selector: ComboBox {
         id: selector; implicitHeight: 40
         background: Rectangle { radius: 9; color: "white"; border.color: "#e3e6ef" }
@@ -81,7 +81,7 @@ ApplicationWindow {
                                 SafeLabel { anchors.centerIn: parent; text: String(modelData.name).charAt(0); color: "#ad73a6"; font.bold: true }
                             }
                             ColumnLayout { spacing: 5; Layout.fillWidth: true
-                                SafeLabel { text: modelData.name; Layout.fillWidth: true; elide: Text.ElideRight; color: win.ink; font.pixelSize: 12 }
+                                SafeLabel { objectName: "authorName"; text: modelData.name; Layout.fillWidth: true; elide: Text.ElideRight; color: win.ink; font.pixelSize: 12 }
                                 Hint { text: modelData.count+" 部作品 · "+modelData.group_name; Layout.fillWidth: true; elide: Text.ElideRight; font.pixelSize: 10 }
                             }
                         }
@@ -163,7 +163,7 @@ ApplicationWindow {
                                     SafeLabel { anchors.centerIn: parent; text: modelData.kind==="gallery"?"原图预览":"实际内容截图"; color: "white"; font.pixelSize: 10 }
                                 }
                             }
-                            SafeLabel { text: modelData.title; color: win.ink; font.bold: true; Layout.fillWidth: true; maximumLineCount: 2; wrapMode: Text.Wrap; elide: Text.ElideRight }
+                            SafeLabel { objectName: "workCardTitle"; text: modelData.title; color: win.ink; font.bold: true; Layout.fillWidth: true; maximumLineCount: 2; wrapMode: Text.Wrap; elide: Text.ElideRight }
                             RowLayout { Layout.fillWidth: true
                                 Hint { text: modelData.author; Layout.fillWidth: true; elide: Text.ElideRight; font.pixelSize: 11 }
                                 Hint { text: modelData.category; color: "#c87898"; font.pixelSize: 10 }
@@ -208,11 +208,11 @@ ApplicationWindow {
                     Rectangle {
                         Layout.fillWidth: true; implicitHeight: summary.implicitHeight+36; radius: 13; color: "white"; border.color: "#e8eaf1"
                         ColumnLayout { id: summary; anchors.left: parent.left; anchors.right: parent.right; anchors.top: parent.top; anchors.margins: 18; spacing: 12
-                            SafeLabel { text: bridge.detail.title || "读取作品…"; font.pixelSize: 22; font.bold: true; color: win.ink; wrapMode: Text.Wrap; Layout.fillWidth: true }
-                            Hint { text: (bridge.detail.author || "作者待获取")+"   ·   "+(bridge.detail.bvid || "")+"   ·   "+(bridge.detail.category || "待分类") }
-                            Hint { objectName: "videoPublished"; text: bridge.detail.published ? new Date(bridge.detail.published*1000).toLocaleString(Qt.locale("zh_CN"),"yyyy-MM-dd hh:mm:ss") : "发布时间待获取" }
+                            SelectableBody { objectName: "videoTitle"; text: bridge.detail.title || "读取作品…"; fontSize: 22; fontBold: true; textColor: win.ink; Layout.fillWidth: true; Layout.preferredHeight: implicitHeight }
+                            SelectableBody { objectName: "videoAuthor"; text: (bridge.detail.author || "作者待获取")+"   ·   "+(bridge.detail.bvid || "")+"   ·   "+(bridge.detail.category || "待分类"); fontSize: 12; textColor: win.muted; Layout.fillWidth: true; Layout.preferredHeight: implicitHeight }
+                            SelectableBody { objectName: "videoPublished"; text: bridge.detail.published ? new Date(bridge.detail.published*1000).toLocaleString(Qt.locale("zh_CN"),"yyyy-MM-dd hh:mm:ss") : "发布时间待获取"; fontSize: 12; textColor: win.muted; Layout.fillWidth: true; Layout.preferredHeight: implicitHeight }
                             SelectableBody { objectName: "videoDescription"; text: bridge.detail.description || "简介待获取"; Layout.fillWidth: true; Layout.preferredHeight: implicitHeight }
-                            SafeLabel { text: (bridge.detail.tags || []).length ? "原站标签："+bridge.detail.tags.join("  ·  ") : ({pending:"原站标签：待获取",empty:"原站确实无标签",failed:"原站标签获取失败"})[bridge.detail.tags_status] || "原站标签待获取"; wrapMode: Text.Wrap; Layout.fillWidth: true; color: "#bc7290"; font.pixelSize: 12 }
+                            SelectableBody { objectName: "videoTags"; text: (bridge.detail.tags || []).length ? "原站标签："+bridge.detail.tags.join("  ·  ") : ({pending:"原站标签：待获取",empty:"原站确实无标签",failed:"原站标签获取失败"})[bridge.detail.tags_status] || "原站标签待获取"; Layout.fillWidth: true; Layout.preferredHeight: implicitHeight; textColor: "#bc7290"; fontSize: 12 }
                             Hint { text: bridge.detail.category_evidence==="user_correction"?"分类依据：用户手动纠正（不会移动原文件）":"分类依据不足，保留待分类；BV号和文件格式不能证明投稿来源。"; Layout.fillWidth: true }
                             RowLayout {
                                 visible: (bridge.detail.assets || []).length>0 && bridge.detail.assets[0].status==="complete"

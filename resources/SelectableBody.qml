@@ -7,9 +7,12 @@ ScrollView {
     property alias text: body.text
     property alias textColor: body.color
     property alias fontSize: body.font.pixelSize
+    property alias fontBold: body.font.bold
+    property real maximumTextHeight: 100
     property alias editor: body
-    implicitHeight: Math.min(100, body.implicitHeight)
+    implicitHeight: Math.min(maximumTextHeight, body.implicitHeight)
     contentWidth: availableWidth
+    ScrollBar.horizontal.policy: ScrollBar.AlwaysOff
     clip: true
     TextArea {
         id: body

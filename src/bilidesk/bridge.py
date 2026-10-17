@@ -6,7 +6,7 @@ import time
 import traceback
 
 from PySide6.QtCore import QObject,Property,Signal,Slot,QProcess,QTimer,QUrl
-from PySide6.QtGui import QDesktopServices
+from PySide6.QtGui import QDesktopServices,QGuiApplication
 
 from .library import Library
 from .media import check_local_file
@@ -107,6 +107,11 @@ class Bridge(QObject):
         return {k:self.lib.setting(k) for k in ('profile','root','ffmpeg')}
 
     def tell(self,text): self._message=text; self.changed.emit()
+
+    @Slot(str)
+    def copyText(self,text):
+        # An explicit local UI action only; never log or persist clipboard text.
+        QGuiApplication.clipboard().setText(text)
 
     @Slot()
     def refresh(self):
