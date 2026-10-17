@@ -4,7 +4,8 @@ import sys
 
 
 def data_dir():
-    return Path(os.environ.get('LOCALAPPDATA', str(Path.home() / '.local/share'))) / 'BiliBatchDownloaderDesk'
+    # 0.2 VERIFY never migrates the 0.1 default library on an accidental direct launch.
+    return Path(os.environ.get('LOCALAPPDATA', str(Path.home() / '.local/share'))) / 'BiliBatchDownloaderGalleryVerify'
 
 
 def resource_root():

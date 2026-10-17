@@ -44,6 +44,8 @@ class Library:
     def initialize(self):
         self.directory.mkdir(parents=True, exist_ok=True)
         with self.connection() as db:
+            if db.execute('PRAGMA user_version').fetchone()[0] > 2:
+                raise ValueError('library_version_newer')
             db.execute('PRAGMA journal_mode=WAL')
             db.executescript('''
             CREATE TABLE IF NOT EXISTS authors(uid TEXT PRIMARY KEY, name TEXT NOT NULL, bio TEXT DEFAULT '', group_name TEXT DEFAULT '未分组');
@@ -60,7 +62,17 @@ class Library:
               state TEXT NOT NULL, phase TEXT DEFAULT '', progress REAL DEFAULT 0, speed REAL DEFAULT 0, error TEXT DEFAULT '', created REAL NOT NULL);
             CREATE UNIQUE INDEX IF NOT EXISTS live_tasks ON tasks(key) WHERE state IN ('queued','running');
             CREATE TABLE IF NOT EXISTS settings(key TEXT PRIMARY KEY,value TEXT NOT NULL);
-            PRAGMA user_version=1;
+            CREATE TABLE IF NOT EXISTS gallery_works(dynamic_id TEXT PRIMARY KEY,uid TEXT NOT NULL REFERENCES authors(uid),
+              title TEXT NOT NULL,description TEXT DEFAULT '',published INTEGER DEFAULT 0,category TEXT DEFAULT '图文／图片',
+              tags TEXT DEFAULT '[]',tags_status TEXT DEFAULT 'pending',livephoto INTEGER NOT NULL,group_count INTEGER NOT NULL,
+              report_sha256 TEXT NOT NULL,updated REAL NOT NULL);
+            CREATE INDEX IF NOT EXISTS gallery_author ON gallery_works(uid,published DESC,dynamic_id);
+            CREATE TABLE IF NOT EXISTS gallery_assets(dynamic_id TEXT NOT NULL REFERENCES gallery_works(dynamic_id),
+              sequence INTEGER NOT NULL,role TEXT NOT NULL CHECK(role IN ('image','live_video')),path TEXT NOT NULL,
+              media_root TEXT NOT NULL,sha256 TEXT NOT NULL,size INTEGER NOT NULL,source_path_sha256 TEXT NOT NULL,
+              format TEXT NOT NULL,duration REAL DEFAULT 0,preview_path TEXT DEFAULT '',status TEXT DEFAULT 'complete',
+              PRIMARY KEY(dynamic_id,sequence,role));
+            PRAGMA user_version=2;
             ''')
 
     def recover(self):
@@ -114,6 +126,7 @@ class Library:
                            (bvid,str(cid),frame['ordinal'],str(frame['path']),frame['seconds'],frame['sha256']))
 
     def classify(self, bvid, category):
+        bvid=bvid.removeprefix('video:')
         if category not in CATEGORIES:
             raise ValueError('invalid_category')
         with self.connection() as db:
@@ -135,31 +148,59 @@ class Library:
             pattern='%'+search.replace('\\','\\\\').replace('%','\\%').replace('_','\\_')+'%'
             params += [pattern]*4+[search]
         if undownloaded:
-            clauses.append("EXISTS(SELECT 1 FROM assets x WHERE x.bvid=w.bvid AND x.status!='complete')")
+            clauses.append('w.local_count<w.parts')
         where=' AND '.join(clauses)
+        combined='''WITH combined AS (
+          SELECT bvid AS id,bvid,'video:'||bvid work_key,'video' kind,uid,title,description,published,category,tags,tags_status,updated,
+          (SELECT COUNT(*) FROM assets x WHERE x.bvid=w.bvid) parts,
+          (SELECT COUNT(*) FROM assets x WHERE x.bvid=w.bvid AND x.status='complete') local_count,
+          (SELECT path FROM previews p WHERE p.bvid=w.bvid ORDER BY cid,ordinal LIMIT 1) cover,0 livephoto
+          FROM works w UNION ALL
+          SELECT dynamic_id,'','gallery:'||dynamic_id,'gallery',uid,title,description,published,category,tags,tags_status,updated,
+          group_count,(SELECT COUNT(*) FROM gallery_assets x WHERE x.dynamic_id=g.dynamic_id AND x.role='image' AND x.status='complete'),
+          (SELECT preview_path FROM gallery_assets x WHERE x.dynamic_id=g.dynamic_id AND x.role='image' ORDER BY sequence LIMIT 1),livephoto
+          FROM gallery_works g) '''
         with self.connection(True) as db:
-            authors=[dict(r) for r in db.execute('SELECT a.*,COUNT(w.bvid) count FROM authors a LEFT JOIN works w ON w.uid=a.uid GROUP BY a.uid ORDER BY a.name')]
-            total=db.execute('SELECT COUNT(*) FROM works w JOIN authors a ON w.uid=a.uid WHERE '+where,params).fetchone()[0]
-            rows=db.execute('''SELECT w.*,a.name author,(SELECT COUNT(*) FROM assets x WHERE x.bvid=w.bvid) parts,
-              (SELECT COUNT(*) FROM assets x WHERE x.bvid=w.bvid AND x.status='complete') local_count,
-              (SELECT path FROM previews p WHERE p.bvid=w.bvid ORDER BY cid,ordinal LIMIT 1) cover
-              FROM works w JOIN authors a ON w.uid=a.uid WHERE '''+where+' ORDER BY w.published DESC,w.bvid LIMIT ? OFFSET ?',params+[limit,offset])
+            authors=[dict(r) for r in db.execute('''SELECT a.*,
+              (SELECT COUNT(*) FROM works w WHERE w.uid=a.uid)+(SELECT COUNT(*) FROM gallery_works g WHERE g.uid=a.uid) count
+              FROM authors a ORDER BY a.name''')]
+            total=db.execute(combined+'SELECT COUNT(*) FROM combined w JOIN authors a ON w.uid=a.uid WHERE '+where,params).fetchone()[0]
+            rows=db.execute(combined+'''SELECT w.*,a.name author FROM combined w JOIN authors a ON w.uid=a.uid WHERE '''+
+                            where+' ORDER BY w.published DESC,w.work_key LIMIT ? OFFSET ?',params+[limit,offset])
             works=[dict(r) for r in rows]
         for w in works:
             w['cover']=Path(w['cover']).as_uri() if w['cover'] else ''
         return dict(authors=authors,works=works,total=total,offset=offset)
 
     def detail(self,bvid):
+        if bvid.startswith('gallery:'):
+            return self.gallery_detail(bvid[8:])
+        bvid=bvid.removeprefix('video:')
         with self.connection(True) as db:
             row=db.execute('SELECT w.*,a.name author FROM works w JOIN authors a ON w.uid=a.uid WHERE bvid=?',(bvid,)).fetchone()
             if not row:
                 return {}
-            work=dict(row); work['tags']=json.loads(work['tags'])
+            work=dict(row); work['tags']=json.loads(work['tags']); work.update(kind='video',work_key='video:'+bvid)
             work['assets']=[dict(r) for r in db.execute('SELECT * FROM assets WHERE bvid=? ORDER BY part',(bvid,))]
             for asset in work['assets']:
                 asset['previews']=[dict(r) for r in db.execute('SELECT * FROM previews WHERE bvid=? AND cid=? ORDER BY ordinal',(bvid,asset['cid']))]
                 for p in asset['previews']:
                     p['url']=Path(p['path']).as_uri()
+        return work
+
+    def gallery_detail(self,dynamic_id):
+        with self.connection(True) as db:
+            row=db.execute('SELECT g.*,a.name author FROM gallery_works g JOIN authors a ON g.uid=a.uid WHERE dynamic_id=?',(dynamic_id,)).fetchone()
+            if not row: return {}
+            work=dict(row); work.update(kind='gallery',work_key='gallery:'+dynamic_id,tags=json.loads(work['tags']),groups=[])
+            assets=[dict(r) for r in db.execute('SELECT * FROM gallery_assets WHERE dynamic_id=? ORDER BY sequence,role',(dynamic_id,))]
+        for sequence in range(1,work['group_count']+1):
+            group={'sequence':sequence,'image':{},'live_video':{}}
+            for a in assets:
+                if a['sequence']==sequence:
+                    a['preview_url']=Path(a['preview_path']).as_uri() if a['preview_path'] else ''
+                    group[a['role']]=a
+            work['groups'].append(group)
         return work
 
     def enqueue(self,kind,payload,key):

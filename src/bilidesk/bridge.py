@@ -10,6 +10,7 @@ from PySide6.QtGui import QDesktopServices
 
 from .library import Library
 from .media import check_local_file
+from .gallery import scan_report,import_report,check_gallery_file,ERRORS as GALLERY_ERRORS
 from .paths import resource_root,worker_command
 from .process import Job
 
@@ -26,22 +27,29 @@ class Bridge(QObject):
     finishedQuery=Signal(int,object)
     failedQuery=Signal(int)
     finishedLocal=Signal(object)
+    finishedGallery=Signal(object)
+    previewReady=Signal(str)
 
-    def __init__(self,directory):
+    def __init__(self,directory,offline=False):
         super().__init__()
         self.lib=Library(directory); self.lib.initialize(); self.lib.recover()
         self.pool=ThreadPoolExecutor(max_workers=2)
         self.local_pool=ThreadPoolExecutor(max_workers=1)
+        self.gallery_pool=ThreadPoolExecutor(max_workers=1)
+        self._gallery_scan={}; self._gallery_revision=0; self._gallery_busy=False; self._preview_revision=0
+        self._offline=offline or self.lib.setting('offline','0')=='1'
+        if self._offline: self.lib.set_setting('offline','1')
         self._opening=set(); self._closing=False
         self._load_state='loading'
         self._authors=[]; self._works=[]; self._detail={}; self._tasks=[]; self._message=''
         self._total=0; self._offset=0; self._uid=''; self._search=''; self._category=''; self._undownloaded=False
         self._bvid=''; self._revision=0; self._paused=self.lib.setting('paused','1')=='1'
         self.process=None; self.job=None; self.active=None; self.buffer=bytearray(); self.terminal=False
-        self._online=self._feature()
+        self._online=self._feature() and not self._offline
         self.finishedQuery.connect(self._receive)
         self.failedQuery.connect(self._queryFailed)
         self.finishedLocal.connect(self._receiveLocal)
+        self.finishedGallery.connect(self._receiveGallery)
         self.timer=QTimer(self); self.timer.setInterval(500); self.timer.timeout.connect(self.tick); self.timer.start()
         self.refresh()
 
@@ -77,6 +85,10 @@ class Bridge(QObject):
     def paused(self): return self._paused
     @Property(bool,notify=changed)
     def online(self): return self._online
+    @Property('QVariantMap',notify=changed)
+    def galleryScan(self): return self._gallery_scan
+    @Property(bool,notify=changed)
+    def galleryBusy(self): return self._gallery_busy
     @Property(str,notify=changed)
     def authorLabel(self):
         return next((a['name'] for a in self._authors if a['uid']==self._uid),'全部作者')
@@ -152,7 +164,8 @@ class Bridge(QObject):
     def page(self,delta):
         self._offset=max(0,min(max(0,self._total-1)//40*40,self._offset+delta*40)); self.refresh()
     @Slot(str)
-    def openWork(self,bvid): self._bvid=bvid; self.refresh()
+    def openWork(self,bvid):
+        self.invalidatePreview(); self._bvid=bvid.removeprefix('video:'); self._detail={}; self.refresh()
     @Slot(str)
     def classify(self,category): self.lib.classify(self._bvid,category); self.refresh()
     @Slot(str,str)
@@ -170,6 +183,79 @@ class Bridge(QObject):
         paths=[QUrl(v).toLocalFile() if v.startswith('file:') else v for v in (source,preview)]
         self.lib.enqueue('import',dict(source=paths[0],preview=paths[1]),'import:'+paths[0])
         self.refresh()
+
+    @Slot()
+    def invalidatePreview(self): self._preview_revision+=1
+
+    @Slot()
+    def clearGalleryScan(self):
+        self._gallery_revision+=1; self._gallery_scan={}; self.changed.emit()
+
+    @Slot(str)
+    def scanGallery(self,path):
+        if self._gallery_busy: return
+        self.clearGalleryScan()
+        path=QUrl(path).toLocalFile() if path.startswith('file:') else path
+        self._gallery_job('scan',lambda:scan_report(self.lib,path))
+
+    @Slot()
+    def importGallery(self):
+        if self._gallery_busy or not self._gallery_scan: return
+        scan=dict(self._gallery_scan)
+        self._gallery_job('import',lambda:import_report(self.lib,scan['path'],scan['report_sha256']))
+
+    def _gallery_job(self,action,operation):
+        self._gallery_busy=True; revision=self._gallery_revision; self.changed.emit()
+        future=self.gallery_pool.submit(operation)
+        def done(f):
+            try: result=dict(action=action,revision=revision,result=f.result())
+            except Exception as exc:
+                reason=str(exc) if isinstance(exc,ValueError) and str(exc) in GALLERY_ERRORS else 'gallery_operation_failed'
+                result=dict(action=action,revision=revision,error=reason)
+            if not self._closing: self.finishedGallery.emit(result)
+        future.add_done_callback(done)
+
+    @Slot(object)
+    def _receiveGallery(self,result):
+        if self._closing: return
+        if result['action'] in ('scan','import'):
+            self._gallery_busy=False
+            if result['revision']!=self._gallery_revision: self.changed.emit(); return
+            if result.get('error'):
+                self._gallery_scan={}; self.tell('图库核验失败，未部分入库：'+result['error']); return
+            if result['action']=='scan':
+                self._gallery_scan=result['result']; self.tell('预扫描完成，请核对作者、作品及数量后确认登记。')
+            else:
+                self._gallery_scan={}; self.tell('图库已原位登记，原文件未移动。'); self.refresh()
+        elif result['action']=='preview':
+            if result['revision']!=self._preview_revision: return
+            if result.get('error'):
+                self.tell(ERRORS.get(result['error'],'无法播放：文件核验未通过，请检查原文件。')); self.previewReady.emit(''); return
+            self.previewReady.emit(QUrl.fromLocalFile(result['result']['path']).toString())
+
+    @Slot(int)
+    def prepareGallery(self,sequence):
+        self.invalidatePreview(); revision=self._preview_revision; work=self._bvid
+        future=self.local_pool.submit(check_gallery_file,self.lib,work,sequence,'live_video')
+        def done(f):
+            try: result=dict(action='preview',revision=revision,result=f.result())
+            except Exception as exc:
+                result=dict(action='preview',revision=revision,error=str(exc) if str(exc) in GALLERY_ERRORS else 'gallery_operation_failed')
+            if not self._closing: self.finishedGallery.emit(result)
+        future.add_done_callback(done)
+
+    @Slot(int,str,bool)
+    def openGallery(self,sequence,role,folder):
+        key=(self._bvid,sequence,role,folder)
+        if self._closing or key in self._opening: return
+        self._opening.add(key); self.tell('正在核验并打开本地文件…')
+        future=self.local_pool.submit(check_gallery_file,self.lib,*key)
+        def done(f):
+            try: result={'key':key,'file':f.result()}
+            except Exception as exc:
+                result={'key':key,'error':str(exc) if str(exc) in GALLERY_ERRORS else 'local_open_failed'}
+            if not self._closing: self.finishedLocal.emit(result)
+        future.add_done_callback(done)
 
     def network_ready(self):
         if not self._online: self.tell('原生联网下载尚未通过验证；当前可离线浏览与播放。'); return False
@@ -245,7 +331,7 @@ class Bridge(QObject):
 
     def tick(self):
         if self.process: return
-        task=self.lib.next_task(local_only=self._paused,offline_only=self.lib.setting('online_stopped','0')=='1')
+        task=self.lib.next_task(local_only=self._paused,offline_only=self._offline or self.lib.setting('online_stopped','0')=='1')
         if not task: return
         if task['kind'] in ('metadata','download') and not self._online:
             self.lib.update_task(task['id'],state='failed',error='online_gate_not_passed'); self.refresh(); return
@@ -331,3 +417,4 @@ class Bridge(QObject):
         if self.process: self.process.kill(); self.process.waitForFinished(3000)
         self.pool.shutdown(wait=True,cancel_futures=True)
         self.local_pool.shutdown(wait=True,cancel_futures=True)
+        self.gallery_pool.shutdown(wait=True,cancel_futures=True)

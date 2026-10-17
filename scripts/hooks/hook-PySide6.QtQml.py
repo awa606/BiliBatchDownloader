@@ -5,7 +5,7 @@ qml_binaries,qml_datas=pyside6_library_info.collect_qtqml_files()
 
 def needed(entry):
     path=entry[1].replace('\\','/').split('/qml/',1)[-1]
-    if path in ('QtQuick','QtQml','QtCore'): return True
+    if path in ('QtQuick','QtQml','QtCore','QtMultimedia'): return True
     return any(path==p or path.startswith(p+'/') for p in (
         'QtQml/Models','QtQml/WorkerScript','QtQuick/Controls','QtQuick/Templates','QtQuick/Layouts',
         'QtQuick/Window','QtQuick/Dialogs','QtQuick/NativeStyle','QtQuick/Effects',

@@ -23,6 +23,7 @@ def execute(spec,emit=emit):
     if action=='synthetic_wait':
         time.sleep(30); return {'synthetic':True}
     if action not in ('metadata','download','native_probe'): raise ValueError('unknown_action')
+    if library.path.exists() and library.setting('offline','0')=='1': raise ValueError('offline_mode')
     from .native import run_native,Budget,Stop
     bvid=payload['bvid']; part=int(payload.get('part',1)); identity(bvid)
     if not 1<=part<=1000: raise ValueError('invalid_part')
@@ -91,7 +92,7 @@ def main():
           'report_not_passed','asset_not_verified','source_hash_mismatch','preview_source_mismatch','preview_hash_mismatch',
           'preview_missing','report_path_outside','report_link_refused','local_file_missing','local_file_changed',
           'invalid_bvid','invalid_part','dedicated_profile_required','ffmpeg_pair_required','media_timeout','media_decode_failed',
-          'media_tracks_invalid','duration_mismatch','destination_conflict'}: reason=str(exc)
+          'media_tracks_invalid','duration_mismatch','destination_conflict','offline_mode'}: reason=str(exc)
         emit({'type':'error','reason':reason or 'worker_operation_failed'}); return 1
 
 

@@ -6,9 +6,10 @@ import QtQuick.Dialogs
 ApplicationWindow {
     id: win
     width: 1240; height: 820; minimumWidth: 940; minimumHeight: 620
-    visible: true; title: "BiliBatchDownloader · 作者作品库 0.1.0 VERIFY"
+    visible: true; title: "BiliBatchDownloader · 作者作品库 0.2.0 VERIFY"
     color: "#f7f8fc"
     property string pageName: "library"
+    onPageNameChanged: { bridge.invalidatePreview(); if (contentLoader.item && contentLoader.item.stopPreview) contentLoader.item.stopPreview(); }
     property string selectedUid: ""
     property string groupUid: ""
     property var selectedParts: ({})
@@ -90,7 +91,7 @@ ApplicationWindow {
                 }
                 Hint { text: "仅显示已登记的作者与作品。\n关注同步将在后续模块提供。"; Layout.fillWidth: true; font.pixelSize: 11 }
                 AppButton { text: "⚙   设置与导入"; Layout.fillWidth: true; onClicked: settingsDialog.open() }
-                Hint { text: "0.1.0  ·  VERIFY 候选版"; Layout.topMargin: 6; font.pixelSize: 10 }
+                Hint { text: "0.2.0  ·  VERIFY 候选版"; Layout.topMargin: 6; font.pixelSize: 10 }
             }
         }
         ColumnLayout {
@@ -104,12 +105,13 @@ ApplicationWindow {
                 Rectangle { width: statusText.implicitWidth+22; height: 28; radius: 14; color: "#e9f6f1"
                     SafeLabel { id: statusText; anchors.centerIn: parent; text: bridge.online?"● 原生视频已验证":"● 离线作品库"; color: "#468c73"; font.pixelSize: 11 }
                 }
-                AppButton { text: "+ 添加视频"; accent: true; onClicked: addDialog.open() }
+                AppButton { text: "+ 添加视频"; accent: true; enabled: bridge.online; onClicked: addDialog.open() }
             }
 
             Loader {
+                id: contentLoader
                 Layout.fillWidth: true; Layout.fillHeight: true
-                sourceComponent: win.pageName==="tasks" ? tasksPage : win.pageName==="detail" ? detailPage : libraryPage
+                sourceComponent: win.pageName==="tasks" ? tasksPage : win.pageName==="detail" ? (bridge.detail.kind==="gallery" ? galleryPage : detailPage) : libraryPage
             }
             Rectangle {
                 Layout.fillWidth: true; Layout.preferredHeight: infoText.implicitHeight+22; radius: 9; color: "#edf0f7"
@@ -154,10 +156,10 @@ ApplicationWindow {
                                 Image { anchors.fill: parent; source: modelData.cover || ""; asynchronous: true; fillMode: Image.PreserveAspectCrop; sourceSize.width: 640 }
                                 SafeLabel { anchors.centerIn: parent; visible: !modelData.cover; text: "▷\n下载后生成预览"; horizontalAlignment: Text.AlignHCenter; color: "#a0a7b8"; font.pixelSize: 15 }
                                 Rectangle { anchors.right: parent.right; anchors.top: parent.top; anchors.margins: 8; width: pill.implicitWidth+16; height: 23; radius: 6; color: "#cc273044"
-                                    SafeLabel { id: pill; anchors.centerIn: parent; text: modelData.local_count+" / "+modelData.parts+" P 已下载"; color: "white"; font.pixelSize: 10 }
+                                    SafeLabel { id: pill; anchors.centerIn: parent; text: modelData.kind==="gallery" ? modelData.parts+(modelData.livephoto?" 组实况":" 张图片") : modelData.local_count+" / "+modelData.parts+" P 已下载"; color: "white"; font.pixelSize: 10 }
                                 }
                                 Rectangle { visible: !!modelData.cover; anchors.left: parent.left; anchors.bottom: parent.bottom; anchors.margins: 7; width: 78; height: 21; radius: 5; color: "#b3232939"
-                                    SafeLabel { anchors.centerIn: parent; text: "实际内容截图"; color: "white"; font.pixelSize: 10 }
+                                    SafeLabel { anchors.centerIn: parent; text: modelData.kind==="gallery"?"原图预览":"实际内容截图"; color: "white"; font.pixelSize: 10 }
                                 }
                             }
                             SafeLabel { text: modelData.title; color: win.ink; font.bold: true; Layout.fillWidth: true; maximumLineCount: 2; wrapMode: Text.Wrap; elide: Text.ElideRight }
@@ -167,7 +169,7 @@ ApplicationWindow {
                             }
                             Item { Layout.fillHeight: true }
                         }
-                        MouseArea { id: cardMouse; anchors.fill: parent; hoverEnabled: true; cursorShape: Qt.PointingHandCursor; onClicked: { bridge.openWork(modelData.bvid); win.selectedParts=({}); win.pageName="detail"; } }
+                        MouseArea { id: cardMouse; anchors.fill: parent; hoverEnabled: true; cursorShape: Qt.PointingHandCursor; onClicked: { bridge.openWork(modelData.work_key); win.selectedParts=({}); win.pageName="detail"; } }
                     }
                 }
                 SafeLabel { anchors.centerIn: parent; visible: grid.count===0; text: bridge.loadState==="loading" ? "正在读取本地作品库…" : bridge.loadState==="error" ? "作品库读取失败，数据未删除\n点击左侧全部作者重试；设置中可查看作品库位置" : "这里还没有作品\n在设置中导入已核验的本地报告，或添加视频"; color: win.muted; horizontalAlignment: Text.AlignHCenter; lineHeight: 1.7 }
@@ -180,6 +182,11 @@ ApplicationWindow {
                 AppButton { text: "下一页"; enabled: bridge.offset+40<bridge.total; onClicked: bridge.page(1) }
             }
         }
+    }
+
+    Component {
+        id: galleryPage
+        GalleryDetail { onBackRequested: win.pageName="library" }
     }
 
     Component {
@@ -321,6 +328,7 @@ ApplicationWindow {
                 Field { id: ffmpegInput; Layout.fillWidth: true; placeholderText: "FFmpeg完整路径，旁边需有FFprobe" }
                 AppButton { text: "选择工具"; onClicked: toolPicker.open() }
             }
+            AppButton { text: "导入图片／实况报告"; onClicked: { settingsDialog.close(); galleryDialog.open(); } }
             AppButton { text: "保存设置"; accent: true; onClicked: bridge.saveSettings(profileInput.text,rootInput.text,ffmpegInput.text) }
             Rectangle { Layout.fillWidth: true; height: 1; color: "#e5e7ef"; Layout.topMargin: 6 }
             SafeLabel { text: "导入已核验研究报告"; color: win.ink; font.bold: true }
@@ -336,6 +344,21 @@ ApplicationWindow {
             AppButton { text: "核验并原位登记"; onClicked: { bridge.importReports(sourceInput.text,previewInput.text); settingsDialog.close(); win.pageName="tasks"; } }
         }
     }
+    Dialog {
+        id: galleryDialog; anchors.centerIn: parent; width: Math.min(650,win.width-60); modal: true
+        title: "原位导入图片与实况"; standardButtons: Dialog.Close
+        ColumnLayout { width: parent.width; spacing: 14
+            Hint { Layout.fillWidth: true; text: "选择已通过原生下载验证的图库报告。先核验并预扫描，确认后事务登记；原文件保持原位。" }
+            RowLayout { Layout.fillWidth: true
+                Field { id: galleryInput; Layout.fillWidth: true; placeholderText: "图库 report.json"; enabled: !bridge.galleryBusy; onTextChanged: bridge.clearGalleryScan() }
+                AppButton { text: "选择报告"; enabled: !bridge.galleryBusy; onClicked: galleryPicker.open() }
+            }
+            AppButton { text: bridge.galleryBusy?"正在后台核验…":"预扫描"; enabled: !bridge.galleryBusy && galleryInput.text.length>0; onClicked: bridge.scanGallery(galleryInput.text) }
+            Hint { Layout.fillWidth: true; text: bridge.galleryScan.status ? "作者 UID："+bridge.galleryScan.uid+"\n动态 ID："+bridge.galleryScan.dynamic_id+"\n"+bridge.galleryScan.group_count+(bridge.galleryScan.livephoto?"组实况":"张图片")+"，共"+bridge.galleryScan.assets+"个文件\n"+(bridge.galleryScan.exists?"已登记：重复导入不会新增作品。":"新作品：原作者名、标题、正文及时间均待获取。") : "等待预扫描；错误会显示在窗口底部。" }
+            AppButton { text: "确认登记"; accent: true; enabled: !bridge.galleryBusy && bridge.galleryScan.status==="READY"; onClicked: bridge.importGallery() }
+        }
+    }
+    FileDialog { id: galleryPicker; nameFilters: ["图库报告 (*.json)"]; onAccepted: galleryInput.text=selectedFile.toString() }
     FolderDialog { id: folderPicker; onAccepted: rootInput.text=selectedFolder.toString() }
     FileDialog { id: toolPicker; nameFilters: ["FFmpeg (ffmpeg.exe)"]; onAccepted: ffmpegInput.text=selectedFile.toString() }
     FileDialog { id: sourcePicker; nameFilters: ["报告 (*.json)"]; onAccepted: sourceInput.text=selectedFile.toString() }

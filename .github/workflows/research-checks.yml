@@ -58,9 +58,11 @@ jobs:
           Copy-Item -LiteralPath packaging/licenses/GPL-3.0.txt -Destination build/license-cache/GPL-3.0.txt
           Copy-Item -LiteralPath packaging/licenses/LGPL-3.0.txt -Destination build/license-cache/LGPL-3.0.txt
       - name: Build portable candidate (no media or credentials)
-        run: python scripts/build_windows.py --name BiliBatchDownloader-0.1.0-ci
+        run: python scripts/build_windows.py --name BiliBatchDownloader-0.2.0-ci
       - name: Exercise frozen UI and worker without Python on PATH
-        run: python scripts/smoke_portable.py --bundle dist/BiliBatchDownloader-0.1.0-ci --output .artifacts/frozen-ci
+        run: python scripts/smoke_portable.py --bundle dist/BiliBatchDownloader-0.2.0-ci --output .artifacts/frozen-ci
+      - name: Exercise actual frozen gallery player and damaged file
+        run: python scripts/smoke_gallery_product.py --bundle dist/BiliBatchDownloader-0.2.0-ci --ffmpeg "$env:BILI_TEST_FFMPEG" --output .artifacts/gallery-product-frozen-ci
       - name: Preserve synthetic CI diagnostics
         if: always()
         uses: actions/upload-artifact@v4
@@ -72,4 +74,6 @@ jobs:
             .artifacts/qt-gallery-frozen.xml
             .artifacts/pytest-qt-frozen/**/report.json
             .artifacts/qt-gallery-freeze-ci/build-receipt.json
+            .artifacts/gallery-product-frozen-ci/report.json
+            .artifacts/gallery-product-frozen-ci/*/ui/report.json
           if-no-files-found: ignore

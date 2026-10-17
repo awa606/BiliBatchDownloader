@@ -36,7 +36,11 @@ def worker(action,payload):
 missing=worker('check_file',dict(bvid='BV13x41117TL',cid='1'))
 assert json.loads(missing.stdout)['reason']=='local_file_missing'
 engine=worker('metadata',dict(bvid='INVALID',part=1))
-assert json.loads(engine.stdout)['reason']=='invalid_bvid'  # Imports actual frozen engine, zero network.
-result=dict(ui='PASS',worker_missing_file='PASS',native_engine_import='PASS',network_requests=0,
+assert json.loads(engine.stdout)['reason']=='offline_mode'  # Candidate refuses network dispatch before importing the engine.
+engine_lib=Library(output/'engine-data'); engine_lib.initialize()
+native_import=subprocess.run([str(bundle/'BiliDeskWorker.exe')],input=json.dumps(dict(data_dir=str(engine_lib.directory),action='metadata',payload=dict(bvid='INVALID',part=1)))+'\n',
+    text=True,capture_output=True,encoding='utf-8',env=env,timeout=15)
+assert json.loads(native_import.stdout)['reason']=='invalid_bvid'  # Actual frozen engine import, never a valid request.
+result=dict(ui='PASS',worker_missing_file='PASS',offline_worker_guard='PASS',native_engine_import='PASS',network_requests=0,
             path_without_python=True,clean_machine='NOT_TESTED',real_playback='MANUAL_REQUIRED')
 (output/'report.json').write_text(json.dumps(result,indent=2),encoding='utf-8'); print(json.dumps(result))
