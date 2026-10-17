@@ -36,6 +36,26 @@ def test_request_budget_delegates_unchanged_and_blocks_thirteenth(monkeypatch):
     assert len(seen)==12 and all(r==( ('GET','/x/test'),{'skip_host':True}) for r in seen)
 
 
+def test_https_proxy_uses_tunnel_destination_not_proxy_address(monkeypatch):
+    seen=[]
+    monkeypatch.setattr(http.client.HTTPConnection,'putrequest',lambda c,*a,**kw:seen.append((a,kw)))
+    conn=http.client.HTTPSConnection('local-proxy.invalid',443)
+    conn.set_tunnel('api.bilibili.com',443)
+    budget=Budget(metadata_only=True)
+    with observe_http(budget):conn.putrequest('GET','/x/web-interface/nav',skip_host=True)
+    assert seen==[(('GET','/x/web-interface/nav'),{'skip_host':True})] and budget.requests==1
+
+
+def test_proxy_tunnel_to_media_is_stopped_before_dispatch(monkeypatch):
+    seen=[]
+    monkeypatch.setattr(http.client.HTTPConnection,'putrequest',lambda *a,**kw:seen.append(True))
+    conn=http.client.HTTPSConnection('local-proxy.invalid',443)
+    conn.set_tunnel('media.bilivideo.com',443)
+    budget=Budget(metadata_only=True)
+    with observe_http(budget),pytest.raises(Stop,match='metadata_host_refused'):conn.putrequest('GET','/asset.mp4')
+    assert not seen and budget.requests==0
+
+
 @pytest.mark.parametrize('status',[400,401,403,404,412,429,500,503])
 def test_any_http_error_stops_metadata(status):
     class Sock:

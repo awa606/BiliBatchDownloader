@@ -1,0 +1,17 @@
+{
+  "status": "FAIL",
+  "reason": "metadata_host_refused",
+  "requests": 0,
+  "media_requests": 0,
+  "registration_sha256": "e2d9f777dd355d63a43656a1827b90afe62c85de8fbe3f6c5beb93c4a9891b2f",
+  "budget": {
+    "requests": 0,
+    "wire_bytes": 0,
+    "http_statuses": []
+  },
+  "discarded_stdout_bytes": 0,
+  "discarded_stderr_bytes": 0,
+  "sources_unchanged": true,
+  "finished_utc": "2026-10-17T13:51:01.587423+00:00",
+  "request_count_scope": "observed_origin_HTTP_requests; proxy_CONNECT_or_TLS_handshakes_not_counted"
+}

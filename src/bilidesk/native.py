@@ -90,7 +90,9 @@ def observe_http(budget):
     original_request=http.client.HTTPConnection.putrequest
     original_begin=http.client.HTTPResponse.begin
     def request(connection,*args,**kwargs):
-        budget.request(connection.host)
+        # HTTPS proxies keep their own address in host; the origin is the tunnel target.
+        target=getattr(connection,'_tunnel_host',None) or connection.host
+        budget.request(target)
         try:
             return original_request(connection,*args,**kwargs)
         except Exception:
