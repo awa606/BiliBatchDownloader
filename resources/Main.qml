@@ -6,7 +6,7 @@ import QtQuick.Dialogs
 ApplicationWindow {
     id: win
     width: 1240; height: 820; minimumWidth: 940; minimumHeight: 620
-    visible: true; title: "BiliBatchDownloader · 作者作品库 0.2.0 VERIFY"
+    visible: true; title: "BiliBatchDownloader · 作者作品库 0.3.0 VERIFY"
     color: "#f7f8fc"
     property string pageName: "library"
     onPageNameChanged: { bridge.invalidatePreview(); if (contentLoader.item && contentLoader.item.stopPreview) contentLoader.item.stopPreview(); }
@@ -91,7 +91,7 @@ ApplicationWindow {
                 }
                 Hint { text: "仅显示已登记的作者与作品。\n关注同步将在后续模块提供。"; Layout.fillWidth: true; font.pixelSize: 11 }
                 AppButton { text: "⚙   设置与导入"; Layout.fillWidth: true; onClicked: settingsDialog.open() }
-                Hint { text: "0.2.0  ·  VERIFY 候选版"; Layout.topMargin: 6; font.pixelSize: 10 }
+                Hint { text: "0.3.0  ·  VERIFY 候选版"; Layout.topMargin: 6; font.pixelSize: 10 }
             }
         }
         ColumnLayout {
@@ -103,15 +103,16 @@ ApplicationWindow {
                     Hint { text: win.pageName==="tasks" ? "后台串行处理 · 原文件与中断文件保留" : "按作者收藏，让每一部作品都有自己的位置" }
                 }
                 Rectangle { width: statusText.implicitWidth+22; height: 28; radius: 14; color: "#e9f6f1"
-                    SafeLabel { id: statusText; anchors.centerIn: parent; text: bridge.online?"● 原生视频已验证":"● 离线作品库"; color: "#468c73"; font.pixelSize: 11 }
+                    SafeLabel { id: statusText; anchors.centerIn: parent; text: bridge.galleryOnline?"● 图库联网 VERIFY":bridge.online?"● 原生视频已验证":"● 离线作品库"; color: "#468c73"; font.pixelSize: 11 }
                 }
+                AppButton { text: "+ 添加图文"; accent: true; enabled: bridge.galleryOnline; onClicked: galleryLinkDialog.open() }
                 AppButton { text: "+ 添加视频"; accent: true; enabled: bridge.online; onClicked: addDialog.open() }
             }
 
             Loader {
                 id: contentLoader
                 Layout.fillWidth: true; Layout.fillHeight: true
-                sourceComponent: win.pageName==="tasks" ? tasksPage : win.pageName==="detail" ? (bridge.detail.kind==="gallery" ? galleryPage : detailPage) : libraryPage
+                sourceComponent: win.pageName==="gallery_select" ? gallerySelectPage : win.pageName==="tasks" ? tasksPage : win.pageName==="detail" ? (bridge.detail.kind==="gallery" ? galleryPage : detailPage) : libraryPage
             }
             Rectangle {
                 Layout.fillWidth: true; Layout.preferredHeight: infoText.implicitHeight+22; radius: 9; color: "#edf0f7"
@@ -176,7 +177,7 @@ ApplicationWindow {
                 ScrollBar.vertical: ScrollBar {}
             }
             RowLayout { Layout.fillWidth: true
-                Hint { text: "每页最多 40 部 · 图片与动态下载尚未开放"; Layout.fillWidth: true }
+                Hint { text: "每页最多 40 部 · 图库可手动选组下载"; Layout.fillWidth: true }
                 AppButton { text: "上一页"; enabled: bridge.offset>0; onClicked: bridge.page(-1) }
                 Hint { text: Math.floor(bridge.offset/40)+1+" / "+Math.max(1,Math.ceil(bridge.total/40)) }
                 AppButton { text: "下一页"; enabled: bridge.offset+40<bridge.total; onClicked: bridge.page(1) }
@@ -277,7 +278,7 @@ ApplicationWindow {
                     width: taskList.width; height: 130; radius: 12; color: "white"; border.color: "#e8eaf1"
                     ColumnLayout { anchors.fill: parent; anchors.margins: 16; spacing: 9
                         RowLayout { Layout.fillWidth: true
-                            SafeLabel { text: ({import:"登记本地作品",check_file:"打开本地文件",metadata:"读取视频信息",download:"下载视频"})[modelData.kind] || "后台任务"; color: win.ink; font.bold: true }
+                            SafeLabel { text: ({import:"登记本地作品",check_file:"打开本地文件",metadata:"读取视频信息",download:"下载视频",gallery_prepare:"读取图文与图片预览",gallery_download:"下载所选图库组"})[modelData.kind] || "后台任务"; color: win.ink; font.bold: true }
                             Hint { text: modelData.key.startsWith("import:")?"原位登记":modelData.key.replace(/^(metadata|download|open):/,""); Layout.fillWidth: true; elide: Text.ElideMiddle }
                             SafeLabel { text: win.taskState(modelData.state); color: modelData.state==="failed"?"#d96d71":"#649482"; font.pixelSize: 12 }
                         }
@@ -295,6 +296,18 @@ ApplicationWindow {
         }
     }
 
+    Connections { target: bridge; function onDraftReady() { win.pageName="gallery_select"; } }
+    Component { id: gallerySelectPage; GallerySelect { onSubmitted: win.pageName="tasks" } }
+    Dialog {
+        id: galleryLinkDialog; anchors.centerIn: parent; width: Math.min(570,win.width-60); modal: true
+        title: "添加单条图文／图片动态"; standardButtons: Dialog.Close
+        ColumnLayout { width: parent.width; spacing: 12
+            Hint { text: "读取照片预览后手动选择，实况照片和视频成组保存。"; Layout.fillWidth: true }
+            Field { id: galleryUrl; objectName: "galleryUrlInput"; Layout.fillWidth: true; placeholderText: "https://www.bilibili.com/opus/… 或 https://t.bilibili.com/…" }
+            AppButton { objectName: "prepareGalleryOnline"; text: "读取信息与图片预览"; enabled: bridge.galleryOnline
+                onClicked: { bridge.addGallery(galleryUrl.text); galleryLinkDialog.close(); win.pageName="tasks"; } }
+        }
+    }
     Dialog {
         id: addDialog; anchors.centerIn: parent; width: 570; modal: true; title: "添加视频到作品库"; standardButtons: Dialog.Close
         ColumnLayout { width: parent.width; spacing: 15

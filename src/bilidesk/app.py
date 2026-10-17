@@ -21,8 +21,11 @@ def main():
     parser.add_argument('--data-dir',type=Path,default=data_dir())
     parser.add_argument('--smoke-output',type=Path)
     parser.add_argument('--gallery-smoke-output',type=Path)
+    parser.add_argument('--selection-smoke-output',type=Path)
     parser.add_argument('--gallery-smoke-expect-error',action='store_true')
-    parser.add_argument('--offline',action='store_true',default=True)
+    modes=parser.add_mutually_exclusive_group()
+    modes.add_argument('--offline',action='store_true')
+    modes.add_argument('--enable-gallery-online',action='store_true')
     parser.add_argument('--require-existing-library',action='store_true')
     parser.add_argument('--width',type=int,default=1240)
     parser.add_argument('--height',type=int,default=820)
@@ -38,7 +41,7 @@ def main():
     start=time.perf_counter()
     QQuickStyle.setStyle('Basic')
     app=QGuiApplication(sys.argv[:1]); app.setApplicationName('BiliBatchDownloader'); app.setOrganizationName('BiliDesk')
-    bridge=Bridge(args.data_dir,offline=args.offline)
+    bridge=Bridge(args.data_dir,offline=not args.enable_gallery_online,gallery_online=args.enable_gallery_online)
     engine=QQmlApplicationEngine()
     engine.rootContext().setContextProperty('bridge',bridge)
     messages=[]
@@ -54,6 +57,9 @@ def main():
         bridge.shutdown(); return 3
     window=engine.rootObjects()[0]; window.setWidth(args.width); window.setHeight(args.height)
     app.aboutToQuit.connect(bridge.shutdown)
+    if args.selection_smoke_output:
+        from .selection_smoke import install
+        install(app,window,bridge,args.selection_smoke_output)
     if args.gallery_smoke_output:
         from .gallery_smoke import install
         install(app,window,bridge,args.gallery_smoke_output,args.gallery_smoke_expect_error,start)

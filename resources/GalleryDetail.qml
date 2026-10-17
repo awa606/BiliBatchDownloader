@@ -44,7 +44,15 @@ ColumnLayout {
         Caption { Layout.fillWidth: true; horizontalAlignment: Text.AlignRight; text: "图文／图片 · "+groups.length+(work.livephoto?"组实况":"张图片") }
     }
     Label { Layout.fillWidth: true; text: work.title || "读取作品…"; textFormat: Text.PlainText; font.pixelSize: 18; font.bold: true; color: "#232939"; elide: Text.ElideRight }
-    Caption { Layout.fillWidth: true; text: (work.author || "作者待获取")+" · 发布时间待获取 · 原站标签待获取\n"+(work.description || "正文待获取") }
+    Caption { Layout.fillWidth: true; text: (work.author || "作者待获取")+" · "+(work.published?new Date(work.published*1000).toLocaleString(Qt.locale(),"yyyy-MM-dd hh:mm"):"发布时间待获取") }
+    Caption { Layout.fillWidth: true; visible: work.tags_status!=="empty"
+        text: work.tags_status==="present"?"标签／话题："+(work.tags || []).concat(work.topics || []).join(" · "):
+              work.tags_status==="failed"?"原站标签获取失败":"原站标签待获取" }
+    ScrollView { Layout.fillWidth: true; Layout.preferredHeight: Math.min(85,descriptionText.implicitHeight+6)
+        visible: work.description_status!=="empty"
+        Caption { id: descriptionText; width: parent.width; text: work.description || (work.description_status==="failed"?"正文获取失败":"正文待获取") }
+    }
+    Caption { Layout.fillWidth: true; text: "已保存 "+(work.saved_groups || 0)+"/"+groups.length+" 组"+(work.selection_complete?" · 所选已完成":"") }
     Rectangle {
         Layout.fillWidth: true; Layout.fillHeight: true; Layout.minimumHeight: 120
         color: "#ebeef5"; radius: 12; clip: true
@@ -59,7 +67,7 @@ ColumnLayout {
             visible: gallery.playingView; fillMode: VideoOutput.PreserveAspectFit
             endOfStreamPolicy: VideoOutput.KeepLastFrame
         }
-        Caption { anchors.centerIn: parent; text: gallery.waiting?"正在核验实况文件…":gallery.playbackError || "图片预览不可用，请检查文件或重新导入报告"; visible: gallery.waiting || !!gallery.playbackError || (!gallery.playingView && photo.status===Image.Error) }
+        Caption { anchors.centerIn: parent; text: gallery.waiting?"正在核验实况文件…":gallery.playbackError || (!gallery.group.image.path?(gallery.group.selected?"本组尚未下载完成":"本组未选择保存"):"图片预览不可用，请检查文件或重新导入报告"); visible: gallery.waiting || !!gallery.playbackError || (!gallery.playingView && (photo.status===Image.Error || !gallery.group.image.path)) }
         Rectangle { anchors.left: parent.left; anchors.top: parent.top; anchors.margins: 12; radius: 6; color: "#ccffffff"; width: badge.implicitWidth+18; height: 26
             Caption { id: badge; anchors.centerIn: parent; text: gallery.playingView?"实况 · 按需播放":"原图预览"; color: "#596176" }
         }

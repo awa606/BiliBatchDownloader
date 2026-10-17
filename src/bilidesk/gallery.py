@@ -149,6 +149,8 @@ def import_report(library,path,expected_sha):
               VALUES(?,?,?,?,?,?,?,?,?,?,?) ON CONFLICT(dynamic_id,sequence,role) DO UPDATE SET preview_path=excluded.preview_path''',
               (report['dynamic_id'],a['sequence'],a['role'],a['path'],a['media_root'],a['sha256'],a['size'],
                a['source_path_sha256'],a['format'],a['duration'],a['preview_path']))
+        db.executemany('INSERT OR IGNORE INTO gallery_selections VALUES(?,?)',
+                       [(report['dynamic_id'],n) for n in range(1,report['group_count']+1)])
     return dict(status='PASS',duplicate=existed,groups=report['group_count'],assets=len(report['assets']))
 
 

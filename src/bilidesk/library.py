@@ -44,7 +44,7 @@ class Library:
     def initialize(self):
         self.directory.mkdir(parents=True, exist_ok=True)
         with self.connection() as db:
-            if db.execute('PRAGMA user_version').fetchone()[0] > 2:
+            if db.execute('PRAGMA user_version').fetchone()[0] > 3:
                 raise ValueError('library_version_newer')
             db.execute('PRAGMA journal_mode=WAL')
             db.executescript('''
@@ -74,10 +74,21 @@ class Library:
               PRIMARY KEY(dynamic_id,sequence,role));
             PRAGMA user_version=2;
             ''')
+            columns={r[1] for r in db.execute('PRAGMA table_info(gallery_works)')}
+            for name,definition in {'description_status':"TEXT DEFAULT 'pending'",'topics':"TEXT DEFAULT '[]'",
+                                     'manifest':"TEXT DEFAULT '{}'",'manifest_sha':"TEXT DEFAULT ''"}.items():
+                if name not in columns: db.execute('ALTER TABLE gallery_works ADD COLUMN '+name+' '+definition)
+            db.executescript('''
+              CREATE TABLE IF NOT EXISTS gallery_drafts(id TEXT PRIMARY KEY,payload TEXT NOT NULL,created REAL NOT NULL);
+              CREATE TABLE IF NOT EXISTS gallery_selections(dynamic_id TEXT NOT NULL REFERENCES gallery_works(dynamic_id),
+                sequence INTEGER NOT NULL,PRIMARY KEY(dynamic_id,sequence));
+              INSERT OR IGNORE INTO gallery_selections SELECT dynamic_id,sequence FROM gallery_assets WHERE role='image';
+              PRAGMA user_version=3;
+            ''')
 
     def recover(self):
         with self.connection() as db:
-            db.execute("UPDATE tasks SET state='interrupted',phase='程序已退出，等待重试',error='worker_interrupted' WHERE state='running'")
+            db.execute("UPDATE tasks SET state='interrupted',phase='程序已退出，等待重试',error='worker_interrupted' WHERE state='running' OR (state='queued' AND kind IN ('metadata','download','gallery_prepare','gallery_download'))")
 
     def setting(self, key, default=''):
         with self.connection(True) as db:
@@ -148,17 +159,19 @@ class Library:
             pattern='%'+search.replace('\\','\\\\').replace('%','\\%').replace('_','\\_')+'%'
             params += [pattern]*4+[search]
         if undownloaded:
-            clauses.append('w.local_count<w.parts')
+            clauses.append('w.local_count<w.target_count')
         where=' AND '.join(clauses)
         combined='''WITH combined AS (
           SELECT bvid AS id,bvid,'video:'||bvid work_key,'video' kind,uid,title,description,published,category,tags,tags_status,updated,
           (SELECT COUNT(*) FROM assets x WHERE x.bvid=w.bvid) parts,
           (SELECT COUNT(*) FROM assets x WHERE x.bvid=w.bvid AND x.status='complete') local_count,
-          (SELECT path FROM previews p WHERE p.bvid=w.bvid ORDER BY cid,ordinal LIMIT 1) cover,0 livephoto
+          (SELECT path FROM previews p WHERE p.bvid=w.bvid ORDER BY cid,ordinal LIMIT 1) cover,0 livephoto,
+          (SELECT COUNT(*) FROM assets x WHERE x.bvid=w.bvid) target_count
           FROM works w UNION ALL
-          SELECT dynamic_id,'','gallery:'||dynamic_id,'gallery',uid,title,description,published,category,tags,tags_status,updated,
+          SELECT dynamic_id,'','gallery:'||dynamic_id,'gallery',uid,title,description,published,category,tags||topics,tags_status,updated,
           group_count,(SELECT COUNT(*) FROM gallery_assets x WHERE x.dynamic_id=g.dynamic_id AND x.role='image' AND x.status='complete'),
-          (SELECT preview_path FROM gallery_assets x WHERE x.dynamic_id=g.dynamic_id AND x.role='image' ORDER BY sequence LIMIT 1),livephoto
+          (SELECT preview_path FROM gallery_assets x WHERE x.dynamic_id=g.dynamic_id AND x.role='image' ORDER BY sequence LIMIT 1),livephoto,
+          (SELECT COUNT(*) FROM gallery_selections s WHERE s.dynamic_id=g.dynamic_id)
           FROM gallery_works g) '''
         with self.connection(True) as db:
             authors=[dict(r) for r in db.execute('''SELECT a.*,
@@ -192,15 +205,22 @@ class Library:
         with self.connection(True) as db:
             row=db.execute('SELECT g.*,a.name author FROM gallery_works g JOIN authors a ON g.uid=a.uid WHERE dynamic_id=?',(dynamic_id,)).fetchone()
             if not row: return {}
-            work=dict(row); work.update(kind='gallery',work_key='gallery:'+dynamic_id,tags=json.loads(work['tags']),groups=[])
+            work=dict(row); work.update(kind='gallery',work_key='gallery:'+dynamic_id,tags=json.loads(work['tags']),
+                                       topics=json.loads(work['topics']),groups=[])
+            selected={r[0] for r in db.execute('SELECT sequence FROM gallery_selections WHERE dynamic_id=?',(dynamic_id,))}
             assets=[dict(r) for r in db.execute('SELECT * FROM gallery_assets WHERE dynamic_id=? ORDER BY sequence,role',(dynamic_id,))]
         for sequence in range(1,work['group_count']+1):
-            group={'sequence':sequence,'image':{},'live_video':{}}
+            group={'sequence':sequence,'image':{},'live_video':{},'selected':sequence in selected}
             for a in assets:
                 if a['sequence']==sequence:
                     a['preview_url']=Path(a['preview_path']).as_uri() if a['preview_path'] else ''
                     group[a['role']]=a
             work['groups'].append(group)
+        saved=sum(bool(g['image'].get('path')) and (not g['live_video'] or bool(g['live_video'].get('path'))) for g in work['groups'])
+        work['saved_groups']=saved; work['selected_groups']=len(selected)
+        work['selection_complete']=bool(selected) and all(bool(g['image'].get('path')) and
+           (not any(a['sequence']==g['sequence'] and a['role']=='live_video' for a in json.loads(work['manifest']).get('assets',[]))
+            or bool(g['live_video'].get('path'))) for g in work['groups'] if g['selected'])
         return work
 
     def enqueue(self,kind,payload,key):
@@ -225,5 +245,7 @@ class Library:
 
     def next_task(self,local_only=False,offline_only=False):
         with self.connection(True) as db:
-            row=db.execute("SELECT * FROM tasks WHERE state='queued'"+(" AND kind NOT IN ('metadata','download')" if offline_only else " AND kind!='download'" if local_only else '')+" ORDER BY created LIMIT 1").fetchone()
+            allowed=('import','check_file') if offline_only else ('import','check_file','metadata','gallery_prepare') if local_only else (
+                'import','check_file','metadata','download','gallery_prepare','gallery_download')
+            row=db.execute("SELECT * FROM tasks WHERE state='queued' AND kind IN ("+','.join('?' for _ in allowed)+") ORDER BY created LIMIT 1",allowed).fetchone()
             return dict(row) if row else None

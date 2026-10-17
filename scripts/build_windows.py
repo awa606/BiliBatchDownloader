@@ -18,7 +18,7 @@ def sha(path):
     return h.hexdigest()
 
 def main():
-    parser=argparse.ArgumentParser(); parser.add_argument('--name',default='BiliBatchDownloader-0.2.0-verify')
+    parser=argparse.ArgumentParser(); parser.add_argument('--name',default='BiliBatchDownloader-0.3.0-verify')
     args=parser.parse_args(); name=args.name
     if not name.startswith('BiliBatchDownloader-') or Path(name).name!=name: raise ValueError('invalid_name')
     target=ROOT/'dist'/name
@@ -50,11 +50,13 @@ COLLECT(gexe,wexe,gui.binaries,gui.datas,worker.binaries,worker.datas,name={name
         result=subprocess.run([sys.executable,'-m','PyInstaller','--noconfirm','--distpath',str(ROOT/'dist'),
            '--workpath',str(build/'work'),str(spec)],cwd=ROOT,env=env,stdout=stream,stderr=subprocess.STDOUT)
     if result.returncode: raise RuntimeError('build_failed_see_local_log')
+    from build_gallery_worker import build as build_gallery_worker
+    build_gallery_worker(ROOT,target,build/'gallery',env)
     if any(sha(ROOT/path)!=value for path,value in fingerprints.items()):
         raise RuntimeError('source_changed_during_build_preserved_for_diagnosis')
     notices=target/'licenses'; notices.mkdir()
     distributions=[]
-    for name in ('PySide6','PySide6_Essentials','PySide6_Addons','shiboken6','yt-dlp','requests','urllib3','certifi','charset-normalizer','idna','pyinstaller'):
+    for name in ('PySide6','PySide6_Essentials','PySide6_Addons','shiboken6','yt-dlp','gallery-dl','requests','urllib3','certifi','charset-normalizer','idna','pyinstaller'):
         distribution=metadata.distribution(name)
         files=[]
         for file in distribution.files or []:
@@ -78,10 +80,10 @@ COLLECT(gexe,wexe,gui.binaries,gui.datas,worker.binaries,worker.datas,name={name
     shutil.copy2(ROOT/'docs/离线使用手册.html',target/'使用手册.html')
     shutil.copy2(ROOT/'docs/第三方依赖.md',notices/'第三方说明.md')
     (notices/'manifest.json').write_text(json.dumps(distributions,ensure_ascii=False,indent=2),encoding='utf-8')
-    (target/'VERSION.json').write_text(json.dumps(dict(version='0.2.0',status='VERIFY',python=sys.version,
+    (target/'VERSION.json').write_text(json.dumps(dict(version='0.3.0',status='VERIFY',python=sys.version,
        source_commit=subprocess.check_output(['git','rev-parse','HEAD'],cwd=ROOT,text=True).strip(),
        source_tree_dirty=bool(subprocess.check_output(['git','status','--porcelain'],cwd=ROOT)),
-       native_scope='one ordinary P1; offline gallery and paired livephoto preview',ffmpeg='external user selected tool pair',
+       native_scope='bounded native gallery selection, text and grouped livephoto preview',ffmpeg='external user selected tool pair',
        source_fingerprints=fingerprints),ensure_ascii=False,indent=2),encoding='utf-8')
     forbidden=[p for p in target.rglob('*') if p.is_file() and (p.suffix.lower() in ('.sqlite3','.db','.mp4','.png','.jpg') or 'cookie' in p.name.lower())]
     # Qt's own resource images may be bundled by an upstream hook, but private files may not.
