@@ -30,16 +30,19 @@ class Quiet:
 
 
 class Budget:
-    def __init__(self, requests=12, seconds=230, size=64*1024*1024, emit=lambda e: None):
+    def __init__(self, requests=12, seconds=230, size=64*1024*1024, emit=lambda e: None, metadata_only=False):
         self.limit=requests; self.deadline=time.monotonic()+seconds; self.size=size
         self.requests=0; self.bytes=0; self.statuses=[]; self.emit=emit
+        self.metadata_only=metadata_only
 
     def check(self):
         if time.monotonic()>self.deadline:
             raise Stop('worker_timeout')
 
-    def request(self):
+    def request(self,host=None):
         self.check()
+        if self.metadata_only and host not in ('www.bilibili.com','api.bilibili.com'):
+            raise Stop('metadata_host_refused')
         if self.requests>=self.limit:
             raise Stop('request_budget_exhausted')
         self.requests+=1
@@ -60,7 +63,11 @@ class CountedFile:
         self.budget.check()
         remaining=self.budget.size-self.budget.bytes
         limit=remaining+1 if size is None or size<0 else min(size,remaining+1)
-        data=getattr(self.source,method)(limit)
+        try:
+            data=getattr(self.source,method)(limit)
+        except Exception:
+            if self.budget.metadata_only: raise Stop('metadata_network_failed') from None
+            raise
         self.budget.bytes+=len(data)
         if self.budget.bytes>self.budget.size:
             raise Stop('transfer_size_limit')
@@ -83,14 +90,22 @@ def observe_http(budget):
     original_request=http.client.HTTPConnection.putrequest
     original_begin=http.client.HTTPResponse.begin
     def request(connection,*args,**kwargs):
-        budget.request()
-        return original_request(connection,*args,**kwargs)
+        budget.request(connection.host)
+        try:
+            return original_request(connection,*args,**kwargs)
+        except Exception:
+            if budget.metadata_only: raise Stop('metadata_network_failed') from None
+            raise
     def begin(response,*args,**kwargs):
         if response.headers is None and not isinstance(response.fp,CountedFile):
             response.fp=CountedFile(response.fp,budget)
-        result=original_begin(response,*args,**kwargs)
+        try:
+            result=original_begin(response,*args,**kwargs)
+        except Exception:
+            if budget.metadata_only: raise Stop('metadata_network_failed') from None
+            raise
         budget.statuses.append(response.status)
-        if response.status in (401,403,412,429):
+        if response.status in (401,403,412,429) or budget.metadata_only and response.status>=400:
             raise Stop('http_'+str(response.status))
         return result
     http.client.HTTPConnection.putrequest=request

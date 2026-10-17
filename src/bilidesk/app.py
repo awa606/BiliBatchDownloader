@@ -22,6 +22,7 @@ def main():
     parser.add_argument('--smoke-output',type=Path)
     parser.add_argument('--gallery-smoke-output',type=Path)
     parser.add_argument('--selection-smoke-output',type=Path)
+    parser.add_argument('--text-smoke-output',type=Path)
     parser.add_argument('--gallery-smoke-expect-error',action='store_true')
     modes=parser.add_mutually_exclusive_group()
     modes.add_argument('--offline',action='store_true')
@@ -57,6 +58,9 @@ def main():
         bridge.shutdown(); return 3
     window=engine.rootObjects()[0]; window.setWidth(args.width); window.setHeight(args.height)
     app.aboutToQuit.connect(bridge.shutdown)
+    if args.text_smoke_output:
+        from .text_smoke import install
+        install(app,window,bridge,args.text_smoke_output)
     if args.selection_smoke_output:
         from .selection_smoke import install
         install(app,window,bridge,args.selection_smoke_output)

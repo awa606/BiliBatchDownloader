@@ -43,7 +43,7 @@ def execute(spec,emit=emit):
     if not profile: raise ValueError('dedicated_profile_required')
     ffmpeg=payload.get('ffmpeg') or library.setting('ffmpeg')
     if not ffmpeg or not Path(ffmpeg).is_file(): raise ValueError('ffmpeg_pair_required')
-    budget=Budget(emit=emit)
+    budget=Budget(emit=emit,metadata_only=action=='metadata')
     try:
         result=run_native(bvid=bvid,part=part,profile=profile,stage=staging,ffmpeg=ffmpeg,
                           download=action!='metadata',expected_cid=payload.get('cid'),emit=emit,budget=budget)

@@ -99,7 +99,7 @@ class Library:
         with self.connection() as db:
             db.execute('INSERT INTO settings VALUES(?,?) ON CONFLICT(key) DO UPDATE SET value=excluded.value', (key,str(value)))
 
-    def save_work(self, work, assets):
+    def save_work(self, work, assets, *, refresh_existing=False):
         identity(work['bvid'], work['uid'])
         if work.get('tags_status','pending') not in ('pending','present','empty','failed'):
             raise ValueError('invalid_tag_status')
@@ -107,6 +107,13 @@ class Library:
             prior=db.execute('SELECT uid FROM works WHERE bvid=?',(work['bvid'],)).fetchone()
             if prior and prior['uid']!=str(work['uid']):
                 raise ValueError('author_identity_conflict')
+            if refresh_existing:
+                if not prior or assets: raise ValueError('metadata_existing_work_required')
+                observed=[(int(p['part']),str(p['cid'])) for p in work['parts']]
+                if len({p for p,c in observed})!=len(observed) or len({c for p,c in observed})!=len(observed):
+                    raise ValueError('metadata_parts_conflict')
+                existing={(r['part'],r['cid']) for r in db.execute('SELECT part,cid FROM assets WHERE bvid=?',(work['bvid'],))}
+                if not existing or not existing.issubset(set(observed)): raise ValueError('metadata_parts_conflict')
             db.execute('INSERT INTO authors(uid,name) VALUES(?,?) ON CONFLICT(uid) DO UPDATE SET name=CASE WHEN excluded.name LIKE ? THEN authors.name ELSE excluded.name END',
                        (str(work['uid']),work.get('author') or '作者 UID '+str(work['uid']), '作者 UID %'))
             db.execute('''INSERT INTO works(bvid,uid,title,description,published,tags,tags_status,updated) VALUES(?,?,?,?,?,?,?,?)

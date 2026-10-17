@@ -44,13 +44,13 @@ ColumnLayout {
         Caption { Layout.fillWidth: true; horizontalAlignment: Text.AlignRight; text: "图文／图片 · "+groups.length+(work.livephoto?"组实况":"张图片") }
     }
     Label { Layout.fillWidth: true; text: work.title || "读取作品…"; textFormat: Text.PlainText; font.pixelSize: 18; font.bold: true; color: "#232939"; elide: Text.ElideRight }
-    Caption { Layout.fillWidth: true; text: (work.author || "作者待获取")+" · "+(work.published?new Date(work.published*1000).toLocaleString(Qt.locale(),"yyyy-MM-dd hh:mm"):"发布时间待获取") }
+    Caption { objectName: "galleryPublished"; Layout.fillWidth: true; text: (work.author || "作者待获取")+" · "+(work.published?new Date(work.published*1000).toLocaleString(Qt.locale("zh_CN"),"yyyy-MM-dd hh:mm:ss"):"发布时间待获取") }
     Caption { Layout.fillWidth: true; visible: work.tags_status!=="empty"
         text: work.tags_status==="present"?"标签／话题："+(work.tags || []).concat(work.topics || []).join(" · "):
               work.tags_status==="failed"?"原站标签获取失败":"原站标签待获取" }
-    ScrollView { Layout.fillWidth: true; Layout.preferredHeight: Math.min(85,descriptionText.implicitHeight+6)
+    SelectableBody { objectName: "galleryDescription"; Layout.fillWidth: true; Layout.preferredHeight: Math.min(85,implicitHeight)
         visible: work.description_status!=="empty"
-        Caption { id: descriptionText; width: parent.width; text: work.description || (work.description_status==="failed"?"正文获取失败":"正文待获取") }
+        text: work.description || (work.description_status==="failed"?"正文获取失败":"正文待获取")
     }
     Caption { Layout.fillWidth: true; text: "已保存 "+(work.saved_groups || 0)+"/"+groups.length+" 组"+(work.selection_complete?" · 所选已完成":"") }
     Rectangle {

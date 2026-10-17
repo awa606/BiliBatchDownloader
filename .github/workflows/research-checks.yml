@@ -65,6 +65,8 @@ jobs:
         run: python scripts/smoke_gallery_product.py --bundle dist/BiliBatchDownloader-0.3.0-ci --ffmpeg "$env:BILI_TEST_FFMPEG" --output .artifacts/gallery-product-frozen-ci
       - name: Exercise frozen selection and native gallery worker offline
         run: python scripts/smoke_gallery_online.py --bundle dist/BiliBatchDownloader-0.3.0-ci --ffmpeg "$env:BILI_TEST_FFMPEG" --output .artifacts/gallery-selection-frozen-ci
+      - name: Exercise frozen text selection and second-resolution times
+        run: python scripts/smoke_text.py --bundle dist/BiliBatchDownloader-0.3.0-ci --output .artifacts/text-frozen-ci
       - name: Preserve synthetic CI diagnostics
         if: always()
         uses: actions/upload-artifact@v4
@@ -72,6 +74,7 @@ jobs:
           name: synthetic-test-diagnostics
           path: |
             .artifacts/tests.xml
+            .artifacts/text-frozen-ci/**/*.json
             .artifacts/gallery-selection-frozen-ci/**/*.json
             .artifacts/frozen-ci/**/*.json
             .artifacts/qt-gallery-frozen.xml

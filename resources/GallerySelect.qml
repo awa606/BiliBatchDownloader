@@ -13,12 +13,12 @@ ColumnLayout {
     spacing: 10
     Label { text: "选择要保存的图片／实况组"; font.pixelSize: 21; font.bold: true; color: "#30374a" }
     Label { Layout.fillWidth: true; text: (selection.draft.metadata || {}).author || ""; textFormat: Text.PlainText }
-    ScrollView {
-        Layout.fillWidth: true; Layout.preferredHeight: Math.min(90,body.implicitHeight+8)
-        visible: body.text.length>0
-        Label { id: body; width: parent.width; wrapMode: Text.Wrap; textFormat: Text.PlainText
-            text: ((selection.draft.metadata || {}).description || "")+((selection.draft.metadata || {}).tags_status==="present"?
-                "\n标签／话题："+((selection.draft.metadata.tags || []).concat(selection.draft.metadata.topics || [])).join(" · "):"") }
+    SelectableBody {
+        objectName: "selectionDescription"
+        Layout.fillWidth: true; Layout.preferredHeight: Math.min(90,implicitHeight)
+        visible: text.length>0
+        text: ((selection.draft.metadata || {}).description || "")+((selection.draft.metadata || {}).tags_status==="present"?
+            "\n标签／话题："+((selection.draft.metadata.tags || []).concat(selection.draft.metadata.topics || [])).join(" · "):"")
     }
     Label { Layout.fillWidth: true; wrapMode: Text.Wrap; color: "#778094"
         text: "预览已读取照片并临时缓存；仅勾选内容进入归档，实况视频在确认后下载。点击图片可放大。" }
