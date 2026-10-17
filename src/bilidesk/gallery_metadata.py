@@ -1,4 +1,5 @@
 """Strict metadata conversion; structural errors contain no source text."""
+import re
 
 _MISSING = object()
 _REASONS = {'metadata_structure_invalid', 'effective_blocked_module',
@@ -30,8 +31,17 @@ def _require(value, expected, reason, field, position):
 
 
 def author_fields(author):
+    from gallery_dl import dt
     name = _require(author.get('name', _MISSING), str, 'author_structure_unknown', 'author_name', {})
-    published = _require(author.get('pub_ts', _MISSING), int, 'author_structure_unknown', 'author_published', {})
+    raw = author.get('pub_ts', _MISSING)
+    # The pinned extractor uses dt.parse_ts, accepting integer strings too.
+    # Restrict the input grammar first: no bool, float, whitespace or unit guessing.
+    if not (type(raw) is int or type(raw) is str and re.fullmatch(r'[0-9]{1,12}', raw)):
+        raise MetadataStructureError('author_structure_unknown', 'author_published', raw)
+    parsed = dt.parse_ts(raw)
+    if not parsed or int(raw) < 0:
+        raise MetadataStructureError('author_structure_unknown', 'author_published', raw)
+    published = int(raw)
     return name, published
 
 
@@ -76,16 +86,20 @@ def metadata(article, *, fragments=None):
                 for node_index, node in enumerate(nodes):
                     node_position = paragraph_position | dict(node_index=node_index)
                     _require(node, dict, 'text_structure_unknown', 'node', node_position)
-                    if 'word' in node:
+                    node_parts = []
+                    if 'word' in node and node['word'] is not None:
                         word = _require(node['word'], dict, 'text_structure_unknown', 'word', node_position)
-                        value = _require(word.get('words', _MISSING), str, 'text_structure_unknown', 'words', node_position)
-                    elif 'rich' in node:
+                        node_parts.append(_require(word.get('words', _MISSING), str,
+                                                   'text_structure_unknown', 'words', node_position))
+                    if 'rich' in node and node['rich'] is not None:
                         rich = _require(node['rich'], dict, 'text_structure_unknown', 'rich', node_position)
-                        value = _require(rich.get('orig_text') or rich.get('text', _MISSING), str,
-                                         'text_structure_unknown', 'rich_text', node_position)
-                    else:
-                        raise MetadataStructureError('text_structure_unknown', 'node', node, **node_position)
-                    parts.append(value)
+                        node_parts.append(_require(rich.get('orig_text') or rich.get('text', _MISSING), str,
+                                                   'text_structure_unknown', 'rich_text', node_position))
+                    if not node_parts:
+                        field = 'word' if 'word' in node else 'rich' if 'rich' in node else 'node'
+                        raise MetadataStructureError('text_structure_unknown', field,
+                                                     node if field=='node' else node[field], **node_position)
+                    parts.extend(node_parts)
                 paragraphs.append(''.join(parts))
                 if fragments is not None:
                     fragments.extend(parts)

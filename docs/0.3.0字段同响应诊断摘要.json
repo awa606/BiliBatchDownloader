@@ -1,0 +1,36 @@
+{
+  "schema": 1,
+  "sample": "1249456774436618276",
+  "author_uid": "1337856191",
+  "diagnostic": "COMPLETED",
+  "adapter": {
+    "status": "REJECTED",
+    "diagnostic": {
+      "type": "metadata_diagnostic",
+      "schema": 1,
+      "status": "REJECTED",
+      "reason": "author_structure_unknown",
+      "field": "author_published",
+      "value_type": "STRING"
+    }
+  },
+  "native_status": "PASS",
+  "baseline": "PASS",
+  "network_requests": 2,
+  "media_requests": 0,
+  "media_bytes": 0,
+  "page": {
+    "status": 200,
+    "raw_bytes": 8046,
+    "decoded_bytes": 25209,
+    "raw_sha256": "accac9f494d0f254dbc7b4f6e85bedfdf187ec31d99e7485efc6856ba3bd4e4b",
+    "decoded_sha256": "4b05796c898ee496c3839a7a06e14bd93476c71fb344193e6769a88b7e25939f"
+  },
+  "prior_raw_equal": true,
+  "prior_decoded_equal": true,
+  "fingerprints_unchanged_at_execution": true,
+  "registration_sha256": "a1481402c98fbd8c2617f2c0a8a3394c19eafe7237a46463ae38f48a3d48094f",
+  "report_sha256": "dfd869a26aba823ecc07476ee42679e77b94e9864e5524b97b6127f88e9341d6",
+  "download_acceptance": "NOT_RUN",
+  "post_fix_online_verification": "NOT_RUN"
+}

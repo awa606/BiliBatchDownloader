@@ -120,3 +120,16 @@ def test_product_limits_before_media(native,variant):
     else: native['responses']['https://www.bilibili.com/opus/1249456774436618276']=(gzip.compress(b'window.__riskdata__ = {}'),200,[('Content-Encoding','gzip')])
     with pytest.raises(Stop):run(native)
     assert len(native['calls'])==2
+
+
+def test_timestamp_string_and_both_text_forms_use_native_product_download_chain(native):
+    modules=native['article']['detail']['modules']
+    modules[0]['module_author']['pub_ts']='1700000000'
+    modules[1]['module_content']['paragraphs'].extend([
+        {'text':{'nodes':[{'word':None,'rich':{'orig_text':'@name','text':'name'}}]}},
+        {'text':{'nodes':[{'word':{'words':'plain'},'rich':{'text':'rich'}}]}}
+    ])
+    result=run(native)
+    assert result['metadata']['published']==1700000000
+    assert result['metadata']['description']=='@name\nplainrich'
+    assert result['budget']['network_requests']==6 and len(result['assets'])==4

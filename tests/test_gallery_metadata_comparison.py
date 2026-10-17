@@ -47,18 +47,44 @@ def test_success_uses_one_state_no_media_and_preserves_paragraphs(native, caplog
 
 
 @pytest.mark.parametrize('variant', ['null_word_rich', 'both'])
-def test_reproduce_native_adapter_text_difference(native, variant):
+def test_native_adapter_text_compatibility_regression(native, variant):
     add_text(native, [{'word': None if variant=='null_word_rich' else {'words':'one'},
                        'rich': {'text':'two'}}])
     result = run(native)
     assert result['diagnostic']=='COMPLETED' and result['native']['status']=='PASS'
-    if variant=='null_word_rich':
-        assert result['adapter']['diagnostic']['field']=='word'
-        assert result['adapter']['diagnostic']['value_type']=='NULL'
-    else:
-        assert result['native']['fragments']['count']==2
-        assert result['adapter']['fragments']['count']==1
-        assert result['text_fragments_equal'] is False
+    assert result['adapter']['status']=='PASS' and result['text_fragments_equal'] is True
+    assert result['adapter']['fragments']['count']==(1 if variant=='null_word_rich' else 2)
+
+
+@pytest.mark.parametrize('value', [0,1,1700000000,'0','1','1700000000','001700000000'])
+def test_integer_timestamp_string_matches_actual_upstream_date(native,value):
+    from gallery_dl import dt
+    from bilidesk.gallery_metadata import author_fields
+    native['article']['detail']['modules'][0]['module_author']['pub_ts']=value
+    result=run(native)
+    assert result['diagnostic']=='COMPLETED' and result['adapter']['status']=='PASS'
+    _,published=author_fields({'name':'synthetic','pub_ts':value})
+    assert type(published) is int and published==int(dt.to_ts(dt.parse_ts(value)))
+
+
+@pytest.mark.parametrize('value', [None,True,1.5,'','-1','+1',' 1','1 ','1.0','1e9','１２３',
+                                  '1700000000000','9'*5000,-1,10**30,{},[]])
+def test_invalid_timestamp_never_becomes_an_empty_or_guessed_date(value):
+    from bilidesk.gallery_metadata import author_fields,MetadataStructureError
+    with pytest.raises(MetadataStructureError) as caught:
+        author_fields({'name':SECRET,'pub_ts':value})
+    assert caught.value.diagnostic['field']=='author_published'
+    assert SECRET not in json.dumps(caught.value.diagnostic)
+
+
+def test_date_string_and_nullable_modules_through_real_extractor(native):
+    native['article']['detail']['modules'][0]['module_author']['pub_ts']='1700000000'
+    for module in native['article']['detail']['modules']:
+        for key in ('module_title','module_content','module_author','module_topic','module_blocked'):
+            module.setdefault(key,None)
+    add_text(native,[{'word':None,'rich':{'text':'one'}},{'word':{'words':'two'},'rich':{'text':'three'}}])
+    result=run(native)
+    assert result['adapter']['status']=='PASS' and result['text_fragments_equal'] is True
 
 
 @pytest.mark.parametrize('variant,field', [('title','title_text'),('tags','tag'),('text','text')])

@@ -42,7 +42,7 @@ def test_fixed_field_and_type_with_no_source_text(module, field, kind):
 
 @pytest.mark.parametrize('name,published,field,kind', [
     (None, 1, 'author_name', 'NULL'),
-    (SECRET, '1', 'author_published', 'STRING'),
+    (SECRET, 'invalid', 'author_published', 'STRING'),
     (SECRET, True, 'author_published', 'BOOLEAN'),
 ])
 def test_author_field_failure_is_distinct(name, published, field, kind):
