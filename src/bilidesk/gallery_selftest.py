@@ -53,7 +53,19 @@ def run(directory,ffmpeg):
         assert events[0]['type']=='metadata_diagnostic' and events[0]['field']=='title_text'
         assert len(calls)==10 and events[-1]['network_requests']==2 and events[-1]['media_requests']==0
         assert not list(destination.iterdir())
-        report={'status':'PASS','synthetic_requests':10,'real_network_requests':0,'native_decode':'PASS',
+        from .gallery_diagnostic import inspect, PageGuard
+        from .gallery_engine import descriptor
+        baseline={'author_uid':'1337856191','assets':[]}
+        for index,url in enumerate(urls,1):
+            row=descriptor(url,{'num':index,'extension':'png'})
+            baseline['assets'].append(dict(sequence=index,suffix='',format='png',source_path_sha256=row['source_path_sha256']))
+        compared=inspect(folder,jar,baseline,guard=PageGuard(sleep=lambda _:None))
+        assert compared['diagnostic']=='COMPLETED' and compared['baseline']=='PASS'
+        assert compared['adapter']['diagnostic']['field']=='title_text'
+        assert compared['native']['status']=='PASS' and len(calls)==12
+        assert compared['budget']['media_requests']==compared['budget']['total_media_bytes']==0
+        report={'status':'PASS','synthetic_requests':12,'real_network_requests':0,'native_decode':'PASS',
+                'page_comparison':compared,
                 'cache_reuse':'PASS','metadata_diagnostic':events[0],'failure_stops_before_media':'PASS'}
         (folder/'report.json').write_text(json.dumps(report),encoding='utf-8')
         return report

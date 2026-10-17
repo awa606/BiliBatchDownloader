@@ -82,7 +82,14 @@ def main():
     try:
         raw=sys.stdin.readline(1024*1024+1)
         if len(raw)>1024*1024: raise Stop('worker_input_limit')
-        result=execute(json.loads(raw),emit); emit({'type':'result','result':result}); return 0
+        spec=json.loads(raw)
+        if len(sys.argv)==2 and sys.argv[1]=='--inspect-metadata':
+            from .gallery_diagnostic import inspect
+            jar,_=load_bili_cookies(spec['profile'],None)
+            result=inspect(Path(spec['directory']),jar,spec['baseline'])
+        else:
+            result=execute(spec,emit)
+        emit({'type':'result','result':result}); return 0
     except Stop as exc:
         emit({'type':'error','reason':exc.reason}); return 1
     except BaseException:

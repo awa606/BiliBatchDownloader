@@ -35,7 +35,7 @@ def author_fields(author):
     return name, published
 
 
-def metadata(article):
+def metadata(article, *, fragments=None):
     paragraphs, tags, topics, title = [], [], [], ''
     reason = 'metadata_structure_invalid'
     _require(article, dict, reason, 'article', {})
@@ -87,6 +87,8 @@ def metadata(article):
                         raise MetadataStructureError('text_structure_unknown', 'node', node, **node_position)
                     parts.append(value)
                 paragraphs.append(''.join(parts))
+                if fragments is not None:
+                    fragments.extend(parts)
     description = '\n'.join(paragraphs)
     return dict(title=title, description=description,
                 description_status='present' if description else 'empty',
