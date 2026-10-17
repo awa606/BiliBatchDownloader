@@ -95,3 +95,28 @@ def test_selected_livephoto_real_decode(live,real_live_media,variant):
         assert all(a['decode']['decoded_frames']==3 for a in result['assets'])
         assert len(live['calls'])==16
         assert all(live['urls'][i] not in [c['url'] for c in live['calls']] for i in [3,5,7,11,13,15])
+
+
+def test_new_guard_preserves_native_request_semantics(native,tmp_path):
+    from gallery_dl import job
+    from gallery_dl.extractor.bilibili import BilibiliArticleExtractor
+    from bilidesk.gallery_transport import native_configuration,NAV
+    run(native);observed=copy.deepcopy(native['calls']);native['calls'].clear()
+    with native_configuration(tmp_path/'plain'):
+        ex=BilibiliArticleExtractor.from_url('https://www.bilibili.com/opus/1249456774436618276')
+        ex.initialize();ex.session.cookies.update(native['jar']);ex.request(NAV)
+        task=job.DownloadJob(ex);task.run();ex.session.close()
+        assert task.status==0
+    for guarded,plain in zip(observed,native['calls'],strict=True):
+        assert {k:v for k,v in guarded.items() if k!='at'}=={k:v for k,v in plain.items() if k!='at'}
+
+
+@pytest.mark.parametrize('variant',['group_limit','duplicate','gzip_risk'])
+def test_product_limits_before_media(native,variant):
+    import json,gzip
+    modules=native['article']['detail']['modules']
+    if variant=='group_limit': modules[1]['module_content']['paragraphs'][0]['pic']['pics']*=9
+    elif variant=='duplicate': modules[1]['module_content']['paragraphs'][0]['pic']['pics'][1]=modules[1]['module_content']['paragraphs'][0]['pic']['pics'][0]
+    else: native['responses']['https://www.bilibili.com/opus/1249456774436618276']=(gzip.compress(b'window.__riskdata__ = {}'),200,[('Content-Encoding','gzip')])
+    with pytest.raises(Stop):run(native)
+    assert len(native['calls'])==2
