@@ -92,7 +92,7 @@ def test_tolerance_difference_is_not_automatically_empty(native, variant, field)
     modules=native['article']['detail']['modules']
     if variant=='title': modules.append({'module_type':'title','module_title':{'text':None}})
     elif variant=='tags': modules.append({'module_type':'title','module_title':{'tags':[{SECRET:SECRET}]}})
-    else: modules[1]['module_content']['paragraphs'][0]['text']=None
+    else: modules[1]['module_content']['paragraphs'][0]['text']=[]
     result=run(native)
     assert result['diagnostic']=='COMPLETED' and result['baseline']=='PASS'
     assert result['adapter']['diagnostic']['field']==field

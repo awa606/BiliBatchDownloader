@@ -72,6 +72,10 @@ def test_input_tracking_query_removed_without_fetch():
 @pytest.mark.parametrize('variant',['valid','oneframe','corrupt'])
 def test_selected_livephoto_real_decode(live,real_live_media,variant):
     import time
+    paragraphs=live['article']['detail']['modules'][1]['module_content']['paragraphs']
+    paragraphs[0]['text']=None
+    paragraphs.extend([{'text':None}, {'text':{'nodes':[{'word':{'words':'first'}}]}},
+                       {'text':None}, {'text':{'nodes':[{'rich':{'text':'second'}}]}}])
     for i,url in enumerate(live['urls']):
         live['media'][url]=real_live_media['photo.jpg' if i%2==0 else 'video.mp4']
     ident='1257912749013336118'
@@ -82,6 +86,7 @@ def test_selected_livephoto_real_decode(live,real_live_media,variant):
         g.deadline=time.monotonic()+180
         return run_stage(ident,name,folder,live['jar'],real_live_media['ffmpeg'],guard=g,prior=prior,selected=[1,5,9])
     prior=phase('prepare'); assert prior['budget']['network_requests']==11
+    assert prior['metadata']['description']=='first\nsecond'
     assert len(prior['assets'])==9
     if variant=='oneframe': live['media'][live['urls'][1]]=real_live_media['oneframe.mp4']
     if variant=='corrupt': live['media'][live['urls'][1]]=b'bad'

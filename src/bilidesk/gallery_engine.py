@@ -62,7 +62,7 @@ def run_stage(dynamic_id,phase,directory,jar,ffmpeg,*,prior=None,selected=(),emi
     page='https://www.bilibili.com/opus/'+dynamic_id
     guard=guard or Guard(page, prior.get('media_bytes',0) if prior else 0)
     guard.checkpoint=checkpoint
-    extractor=None; result={}; saved=[]
+    extractor=None; result={}; saved=[]; text_fragments=[]
     try:
         with native_configuration(directory):
             extractor=BilibiliArticleExtractor.from_url(page); extractor.initialize()
@@ -95,7 +95,7 @@ def run_stage(dynamic_id,phase,directory,jar,ffmpeg,*,prior=None,selected=(),emi
                 author=authors[0]; uid=str(author.get('mid'))
                 if not re.fullmatch('[1-9][0-9]{0,19}',uid): raise Stop('author_identity_mismatch')
                 try:
-                    result.update(metadata(value))
+                    result.update(metadata(value,fragments=text_fragments))
                     name, published = author_fields(author)
                 except MetadataStructureError as exc:
                     emit(exc.diagnostic)
@@ -112,6 +112,14 @@ def run_stage(dynamic_id,phase,directory,jar,ffmpeg,*,prior=None,selected=(),emi
                     raise Stop('message_identity_mismatch')
                 if any(k.startswith('_http') for k in data): raise Stop('message_control_rejected')
                 if kind==Message.Directory and not messages:
+                    native_text=data.get('content')
+                    valid=type(native_text) is list and all(type(t) is str for t in native_text)
+                    equal=valid and native_text==text_fragments
+                    emit(dict(type='metadata_parity',schema=1,status='PASS' if equal else 'FAIL',
+                              local_count=len(text_fragments),native_count=len(native_text) if valid else None,
+                              local_sha256=fingerprint(text_fragments),
+                              native_sha256=fingerprint(native_text) if valid else None))
+                    if not equal: raise Stop('gallery_text_parity_failed')
                     count=data.get('count')
                     if type(count)!=int or not 1<=count<=32: raise Stop('gallery_group_limit')
                 elif kind==Message.Url and messages:

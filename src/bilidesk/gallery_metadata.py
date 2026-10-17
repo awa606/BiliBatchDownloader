@@ -78,7 +78,9 @@ def metadata(article, *, fragments=None):
             for paragraph_index, paragraph in enumerate(content_paragraphs):
                 paragraph_position = position | dict(paragraph_index=paragraph_index)
                 _require(paragraph, dict, 'text_structure_unknown', 'paragraph', paragraph_position)
-                if 'text' not in paragraph:
+                # gallery-dl skips nullable text on this paragraph and continues
+                # with later paragraphs. Do not swallow malformed non-null text.
+                if 'text' not in paragraph or paragraph['text'] is None:
                     continue
                 text = _require(paragraph['text'], dict, 'text_structure_unknown', 'text', paragraph_position)
                 nodes = _require(text.get('nodes', _MISSING), list, 'text_structure_unknown', 'nodes', paragraph_position)

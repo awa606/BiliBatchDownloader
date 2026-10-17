@@ -21,7 +21,7 @@ from test_gallery_native_probe import native, SECRET
     ({'module_content': {SECRET: SECRET}}, 'paragraphs', 'MISSING'),
     ({'module_content': {'paragraphs': SECRET}}, 'paragraphs', 'STRING'),
     ({'module_content': {'paragraphs': [SECRET]}}, 'paragraph', 'STRING'),
-    ({'module_content': {'paragraphs': [{'text': None}]}}, 'text', 'NULL'),
+    ({'module_content': {'paragraphs': [{'text': False}]}}, 'text', 'BOOLEAN'),
     ({'module_content': {'paragraphs': [{'text': {}}]}}, 'nodes', 'MISSING'),
     ({'module_content': {'paragraphs': [{'text': {'nodes': [SECRET]}}]}}, 'node', 'STRING'),
     ({'module_content': {'paragraphs': [{'text': {'nodes': [{SECRET: SECRET}]}}]}}, 'node', 'OBJECT'),

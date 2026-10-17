@@ -20,11 +20,14 @@ def run(directory,ffmpeg):
     png=b'\x89PNG\r\n\x1a\n'+chunk(b'IHDR',struct.pack('!2I5B',2,2,8,2,0,0,0))+chunk(b'IDAT',zlib.compress((b'\x00'+b'\xff\x00\x00'*2)*2))+chunk(b'IEND',b'')
     article={'id':ident,'detail':{'modules':[
         {'module_type':'author','module_author':{'mid':1337856191,'name':'synthetic','pub_ts':'1700000000'}},
-        {'module_type':'content','module_content':{'paragraphs':[{'pic':{'pics':[{'url':u} for u in urls]}}]}}
+        {'module_type':'content','module_content':{'paragraphs':[{'text':None,'pic':{'pics':[{'url':u} for u in urls]}}]}}
     ]}}
     article['detail']['modules'][1]['module_content']['paragraphs'].extend([
+        {'text':None},
         {'text':{'nodes':[{'word':None,'rich':{'text':'rich'}}]}},
-        {'text':{'nodes':[{'word':{'words':'plain'},'rich':{'text':'both'}}]}}
+        {'text':None},
+        {'text':{'nodes':[{'word':{'words':'plain'},'rich':{'text':'both'}}]}},
+        {'text':None},
     ])
     calls=[];old=requests.adapters.HTTPAdapter.send;connect=socket.socket.connect
     def forbidden(*args): raise RuntimeError('socket_forbidden_in_synthetic_check')
@@ -40,15 +43,17 @@ def run(directory,ffmpeg):
     requests.adapters.HTTPAdapter.send=send;socket.socket.connect=forbidden
     try:
         jar=requests.cookies.RequestsCookieJar()
-        outputs=[]
+        outputs=[]; success_events=[]
         for phase in ('prepare','download'):
             destination=folder/phase;destination.mkdir()
             prior=outputs[0] if outputs else None
             g=Guard(page,prior['media_bytes'] if prior else 0,sleep=lambda _:None)
-            outputs.append(run_stage(ident,phase,destination,jar,ffmpeg,prior=prior,selected=[1,3],guard=g))
+            outputs.append(run_stage(ident,phase,destination,jar,ffmpeg,prior=prior,selected=[1,3],guard=g,emit=success_events.append))
         assert len(calls)==8 and outputs[1]['assets']==[]
         assert outputs[0]['metadata']['published']==1700000000
         assert outputs[0]['metadata']['description']=='rich\nplainboth'
+        parity=[e for e in success_events if e['type']=='metadata_parity']
+        assert len(parity)==2 and all(e['status']=='PASS' and e['local_count']==e['native_count']==3 for e in parity)
         article['detail']['modules'].append({'module_type':'title','module_title':{'text':None}})
         destination=folder/'rejected';destination.mkdir();events=[]
         try:
@@ -72,6 +77,7 @@ def run(directory,ffmpeg):
         assert compared['budget']['media_requests']==compared['budget']['total_media_bytes']==0
         report={'status':'PASS','synthetic_requests':12,'real_network_requests':0,'native_decode':'PASS',
                 'timestamp_and_text_compatibility':'PASS',
+                'null_paragraph_text':'PASS','metadata_parity':parity,
                 'page_comparison':compared,
                 'cache_reuse':'PASS','metadata_diagnostic':events[0],'failure_stops_before_media':'PASS'}
         (folder/'report.json').write_text(json.dumps(report),encoding='utf-8')

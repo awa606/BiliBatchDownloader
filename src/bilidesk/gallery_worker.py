@@ -50,6 +50,8 @@ def execute(spec,emit):
             (stage/'budget.json').write_text(json.dumps(event,indent=2),encoding='utf-8')
         elif event.get('type')=='metadata_diagnostic':
             (stage/'metadata-diagnostic.json').write_text(json.dumps(event,indent=2),encoding='utf-8')
+        elif event.get('type')=='metadata_parity':
+            (stage/'metadata-parity.json').write_text(json.dumps(event,indent=2),encoding='utf-8')
         emit(event)
     def manifest(value):
         if prior is None: return

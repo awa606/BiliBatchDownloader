@@ -1,4 +1,4 @@
-"""Register/execute exactly one fixed four-stage product check; stop at first failure."""
+"""Register/execute one fixed product check; stop at first failure."""
 import argparse
 from datetime import datetime,timezone
 from importlib import import_module,metadata
@@ -21,6 +21,19 @@ SAMPLE_ROWS=[('images','1249456774436618276',[1,3],6,2,'8afb9ed55ff35e3ed17eb947
  ('livephoto','1257912749013336118',[1,5,9],11,5,'a98aaf48db64d4c85bc5baeaf7ccc59a0c609d699d60b34cdcc345ded8dd3b5b')]
 
 
+def fixed_plan(sample):
+    if sample not in ('all','livephoto'): raise ValueError('unknown_fixed_sample')
+    rows=[r for r in SAMPLE_ROWS if sample=='all' or r[0]==sample]
+    return dict(sample_mode=sample,
+                stages=[dict(sample=r[1],selected=r[2],prepare_limit=r[3],download_limit=r[4]) for r in rows],
+                total_request_limit=sum(r[3]+r[4] for r in rows)),rows
+
+
+def require_registered_plan(registration,plan):
+    if any(registration.get(k)!=v for k,v in plan.items()):
+        raise ValueError('registered_plan_changed')
+
+
 def worker_environment(original):
     env=dict(original)
     windows=Path(env.get('SystemRoot') or env.get('SYSTEMROOT') or 'C:/Windows')
@@ -37,7 +50,7 @@ def fingerprints(bundle,ffmpeg):
         p=ROOT/f'.artifacts/U03-gallery-user-{name}-20261016-attempt1.json'
         assert digest(p)==expected
         result[str(p.relative_to(ROOT))]=expected
-    for name in ('gallery_dl.job','gallery_dl.extractor.bilibili','gallery_dl.downloader.http','requests.adapters','urllib3.response'):
+    for name in ('gallery_dl.job','gallery_dl.extractor.bilibili','gallery_dl.dt','gallery_dl.downloader.http','requests.adapters','urllib3.response'):
         result[name]=digest(Path(import_module(name).__file__))
     result['worker']=digest(bundle/'gallery-worker/BiliGalleryWorker.exe')
     result['ffmpeg']=digest(ffmpeg);result['ffprobe']=digest(ffmpeg.with_name('ffprobe.exe'))
@@ -46,7 +59,9 @@ def fingerprints(bundle,ffmpeg):
 
 def main():
     p=argparse.ArgumentParser();p.add_argument('--output',required=True,type=Path);p.add_argument('--bundle',required=True,type=Path)
-    p.add_argument('--source-library',required=True,type=Path);p.add_argument('--execute',action='store_true');a=p.parse_args()
+    p.add_argument('--source-library',required=True,type=Path);p.add_argument('--execute',action='store_true')
+    p.add_argument('--sample',choices=('all','livephoto'),default='all');a=p.parse_args()
+    plan,rows=fixed_plan(a.sample)
     out=a.output.resolve();bundle=a.bundle.resolve();source=Library(a.source_library.resolve())
     ffmpeg=Path(source.setting('ffmpeg'));assert out.is_relative_to(ROOT/'.artifacts')
     prints=fingerprints(bundle,ffmpeg)
@@ -55,14 +70,14 @@ def main():
         registration=dict(registered_utc=datetime.now(timezone.utc).isoformat(),fingerprints=prints,
             source_commit=subprocess.check_output(['git','rev-parse','HEAD'],cwd=ROOT,text=True).strip(),
             dependencies={k:metadata.version(k) for k in ('gallery-dl','requests','urllib3','yt-dlp')},
-            stages=[dict(sample=r[1],selected=r[2],prepare_limit=r[3],download_limit=r[4]) for r in SAMPLE_ROWS],
-            total_request_limit=24,retries=0,redirects=0,worker_seconds=180,network_wait=15,interval_seconds=1,
+            **plan,retries=0,redirects=0,worker_seconds=180,network_wait=15,interval_seconds=1,
             page_bytes=3*1024**2,asset_bytes=64*1024**2,sample_media_bytes=256*1024**2,
             stop='first failure stops all remaining stages; no replacement or retry')
         (out/'registration.json').write_text(json.dumps(registration,indent=2),encoding='utf-8')
         print(json.dumps({'status':'REGISTERED','requests':0}));return
     registration=json.loads((out/'registration.json').read_text(encoding='utf-8'))
     assert prints==registration['fingerprints']
+    require_registered_plan(registration,plan)
     with (out/'execution-started.json').open('x',encoding='utf-8') as f:json.dump({'utc':datetime.now(timezone.utc).isoformat()},f)
     lib=Library(out/'private-library');lib.initialize()
     for key in ('profile','ffmpeg'):lib.set_setting(key,source.setting(key))
@@ -70,7 +85,7 @@ def main():
     env=worker_environment(os.environ)
     report={'status':'IN_PROGRESS','registration_sha256':digest(out/'registration.json'),'stages':[],'total_requests':0}
     try:
-        for name,ident,selected,prepare_limit,download_limit,_ in SAMPLE_ROWS:
+        for name,ident,selected,prepare_limit,download_limit,_ in rows:
             baseline=load_baseline(ROOT/f'.artifacts/U03-gallery-user-{name}-20261016-attempt1.json',SAMPLES[name])
             prior=None
             for phase,limit in [('prepare',prepare_limit),('download',download_limit)]:
@@ -92,10 +107,14 @@ def main():
                 count=budget['network_requests'] if budget else None
                 row.update(requests=count,budget=budget)
                 row['metadata_diagnostics']=[e for e in events if e.get('type')=='metadata_diagnostic']
+                parity=[e for e in events if e.get('type')=='metadata_parity']
+                row['metadata_parity']=parity
                 report['total_requests']=None if count is None else report['total_requests']+count
                 error=next((e for e in events if e.get('type')=='error'),None)
                 result=next((e['result'] for e in events if e.get('type')=='result'),None)
-                if error or process.returncode or not result or count!=limit or report['total_requests']>24:
+                if (error or process.returncode or not result or count!=limit
+                    or report['total_requests']>plan['total_request_limit']
+                    or len(parity)!=1 or parity[0]['status']!='PASS'):
                     row['reason']=error['reason'] if error else 'worker_or_budget_contract_failed';return
                 if phase=='prepare':
                     prior=result;draft=load_draft(lib,result['draft_id']);m=draft['metadata']
