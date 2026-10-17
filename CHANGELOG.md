@@ -4,6 +4,7 @@
 
 - 同响应诊断：一次2请求、0媒体；原始/解码页面SHA与历史失败一致，确认为字符串发布时间被整型检查拒绝。原生提取、UID及四图清单PASS，下载NOT_RUN。
 - 最小兼容修复：复用gallery-dl时间解析并限制整数/ASCII十进制整数字符串；保留word为空时的有效rich，按上游顺序保留同时存在的word/rich。非法时间、未知标签和损坏正文仍拒绝，状态不伪装为空。修复后无新增B站请求；[记录](docs/图库元数据兼容修复-20261017.md)。
+- 修复提交826b07f：本机924 PASS/1权限SKIP、实际FFmpeg合成检查通过；[Windows CI](https://github.com/awa606/BiliBatchDownloader/actions/runs/39024164086)925 PASS/0 SKIP、冻结研究12 PASS及完整冻结产品检查通过。独立冻结worker源码指纹一致，原0.2库及失败证据不变。真实修复后页面与完整下载另待验证。
 
 - 新一轮固定验证：登录和四图页2请求均HTTP 200、GZIP解码通过，元数据转换报`gallery_metadata_structure_unknown`；0媒体，剩余阶段停止。新增字段类别/类型/位置脱敏诊断和实际原生链停止测试，不放宽未知字段、不补写真实通过；[本轮记录](docs/图库联网字段结构失败-20261017.md)。
 - 诊断提交343e8db：本机862 PASS/1权限SKIP，[Windows CI](https://github.com/awa606/BiliBatchDownloader/actions/runs/39022083457)863 PASS/0 SKIP、冻结研究12 PASS及完整冻结产品检查通过。诊断已可用，真实字段兼容性仍未修复；继续保留0.2.0。
