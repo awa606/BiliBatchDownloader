@@ -170,7 +170,7 @@ ApplicationWindow {
                         MouseArea { id: cardMouse; anchors.fill: parent; hoverEnabled: true; cursorShape: Qt.PointingHandCursor; onClicked: { bridge.openWork(modelData.bvid); win.selectedParts=({}); win.pageName="detail"; } }
                     }
                 }
-                SafeLabel { anchors.centerIn: parent; visible: grid.count===0; text: "这里还没有作品\n在设置中导入已核验的本地报告，或添加视频"; color: win.muted; horizontalAlignment: Text.AlignHCenter; lineHeight: 1.7 }
+                SafeLabel { anchors.centerIn: parent; visible: grid.count===0; text: bridge.loadState==="loading" ? "正在读取本地作品库…" : bridge.loadState==="error" ? "作品库读取失败，数据未删除\n点击左侧全部作者重试；设置中可查看作品库位置" : "这里还没有作品\n在设置中导入已核验的本地报告，或添加视频"; color: win.muted; horizontalAlignment: Text.AlignHCenter; lineHeight: 1.7 }
                 ScrollBar.vertical: ScrollBar {}
             }
             RowLayout { Layout.fillWidth: true
@@ -310,6 +310,7 @@ ApplicationWindow {
         onOpened: { profileInput.text=bridge.settings.profile; rootInput.text=bridge.settings.root; ffmpegInput.text=bridge.settings.ffmpeg; }
         ColumnLayout { width: parent.width; spacing: 12
             Hint { text: "独立用户数据目录 · 不保存 Cookie · 不改系统播放器关联"; Layout.fillWidth: true }
+            Hint { text: "当前作品库："+bridge.libraryDirectory; Layout.fillWidth: true; wrapMode: Text.WrapAnywhere }
             SafeLabel { text: "专用 Chrome 档案目录（先在旧工具完成登录，再关闭该浏览器）"; color: win.ink }
             Field { id: profileInput; Layout.fillWidth: true; placeholderText: "选择你已登录B站的专用档案目录" }
             RowLayout { Layout.fillWidth: true

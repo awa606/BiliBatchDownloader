@@ -3,6 +3,7 @@ import json
 from pathlib import Path
 import re
 import time
+import traceback
 
 from PySide6.QtCore import QObject,Property,Signal,Slot,QProcess,QTimer,QUrl
 from PySide6.QtGui import QDesktopServices
@@ -23,6 +24,7 @@ ERRORS={'local_file_missing':'文件已不存在，请检查原路径。','local
 class Bridge(QObject):
     changed=Signal()
     finishedQuery=Signal(int,object)
+    failedQuery=Signal(int)
     finishedLocal=Signal(object)
 
     def __init__(self,directory):
@@ -31,12 +33,14 @@ class Bridge(QObject):
         self.pool=ThreadPoolExecutor(max_workers=2)
         self.local_pool=ThreadPoolExecutor(max_workers=1)
         self._opening=set(); self._closing=False
+        self._load_state='loading'
         self._authors=[]; self._works=[]; self._detail={}; self._tasks=[]; self._message=''
         self._total=0; self._offset=0; self._uid=''; self._search=''; self._category=''; self._undownloaded=False
         self._bvid=''; self._revision=0; self._paused=self.lib.setting('paused','1')=='1'
         self.process=None; self.job=None; self.active=None; self.buffer=bytearray(); self.terminal=False
         self._online=self._feature()
         self.finishedQuery.connect(self._receive)
+        self.failedQuery.connect(self._queryFailed)
         self.finishedLocal.connect(self._receiveLocal)
         self.timer=QTimer(self); self.timer.setInterval(500); self.timer.timeout.connect(self.tick); self.timer.start()
         self.refresh()
@@ -55,6 +59,10 @@ class Bridge(QObject):
     def detail(self): return self._detail
     @Property(str,notify=changed)
     def message(self): return self._message
+    @Property(str,notify=changed)
+    def loadState(self): return self._load_state
+    @Property(str,constant=True)
+    def libraryDirectory(self): return str(self.lib.directory)
     @Property(int,notify=changed)
     def total(self): return self._total
     @Property(int,notify=changed)
@@ -81,21 +89,55 @@ class Bridge(QObject):
     @Slot()
     def refresh(self):
         self._revision+=1; rev=self._revision
+        self._load_state='loading'
         args=(self._uid,self._search,self._category,self._undownloaded,self._offset)
         bvid=self._bvid
         def read():
             return self.lib.snapshot(*args),self.lib.detail(bvid) if bvid else {},self.lib.tasks()
         future=self.pool.submit(read)
         def done(f):
-            try: self.finishedQuery.emit(rev,f.result())
-            except Exception: pass
+            try:
+                result=f.result()
+                report={'state':'ready','authors':len(result[0]['authors']),'works':result[0]['total'],'revision':rev}
+            except Exception as exc:
+                result=None
+                report={'state':'error','revision':rev,'error_type':type(exc).__name__,
+                    'sqlite_error_code':getattr(exc,'sqlite_errorcode',None),
+                    'frames':[{'file':Path(frame.filename).name,'line':frame.lineno}
+                              for frame in traceback.extract_tb(exc.__traceback__)]}
+            report['data_directory']=str(self.lib.directory)
+            try:
+                # Local diagnostics contain no titles, SQL, cookies, or exception text.
+                (self.lib.directory/'library-status.json').write_text(json.dumps(report,ensure_ascii=False,indent=2),encoding='utf-8')
+            except OSError: pass
+            if self._closing: return
+            try:
+                if result is None: self.failedQuery.emit(rev)
+                else: self.finishedQuery.emit(rev,result)
+            except Exception as exc:
+                report.update(state='signal_error',error_type=type(exc).__name__)
+                try: (self.lib.directory/'library-status.json').write_text(json.dumps(report,ensure_ascii=False,indent=2),encoding='utf-8')
+                except OSError: pass
         future.add_done_callback(done)
+
+    @Slot(int)
+    def _queryFailed(self,rev):
+        if rev!=self._revision or self._closing: return
+        self._load_state='error'
+        self.tell('作品库读取失败，原数据未删除。可点击“全部作者”重试；设置中可查看作品库位置。')
 
     @Slot(int,object)
     def _receive(self,rev,result):
         if rev!=self._revision: return
         snap,detail,tasks=result
+        self._load_state='ready'
+        if self._message.startswith('作品库读取失败'): self._message=''
         self._authors=snap['authors']; self._works=snap['works']; self._total=snap['total']; self._detail=detail; self._tasks=tasks
+        applied={'revision':rev,'authors':len(self._authors),'works':self._total}
+        def record_applied():
+            try: (self.lib.directory/'library-ui-status.json').write_text(json.dumps(applied),encoding='utf-8')
+            except OSError: pass
+        self.pool.submit(record_applied)
         self.changed.emit()
 
     @Slot(str)

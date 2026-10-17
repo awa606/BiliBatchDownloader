@@ -101,3 +101,23 @@ def test_no_player_launch_after_shutdown(tmp_path,monkeypatch):
     bridge.openLocal('100',False); assert started.wait(2)
     release.set(); bridge.shutdown(); app.processEvents()
     assert not opened
+
+
+def test_failed_query_is_visible_and_can_recover_without_erasing_library(tmp_path,monkeypatch):
+    import json
+    app=QGuiApplication.instance() or QGuiApplication([])
+    bridge=Bridge(tmp_path/'data'); bridge.timer.stop()
+    bridge.lib.save_work(dict(bvid='BV13x41117TL',uid='10'),[dict(cid='100',part=1)])
+    real_snapshot=bridge.lib.snapshot
+    def broken(*args): raise ValueError('SENSITIVE_SENTINEL')
+    monkeypatch.setattr(bridge.lib,'snapshot',broken)
+    try:
+        bridge.refresh(); spin_until(app,lambda:bridge.loadState=='error')
+        assert '读取失败' in bridge.message
+        raw=(bridge.lib.directory/'library-status.json').read_text(encoding='utf-8')
+        report=json.loads(raw); assert report['state']=='error' and report['error_type']=='ValueError'
+        assert 'SENSITIVE_SENTINEL' not in raw
+        monkeypatch.setattr(bridge.lib,'snapshot',real_snapshot)
+        bridge.refresh(); spin_until(app,lambda:bridge.loadState=='ready' and bridge.total==1)
+        assert not bridge.message and bridge.authors[0]['uid']=='10'
+    finally: bridge.shutdown()
