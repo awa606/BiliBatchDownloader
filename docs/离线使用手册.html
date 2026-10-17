@@ -1,6 +1,6 @@
 <!doctype html><html lang="zh-CN"><meta charset="utf-8"><title>Bili 作品库 0.3.0 VERIFY 使用手册</title>
 <style>body{font:16px/1.8 "Microsoft YaHei",sans-serif;max-width:900px;margin:40px auto;padding:24px;background:#f8f9fc;color:#283044}h1,h2{color:#c85784}code{background:#eceef6;padding:3px 6px}</style>
-<h1>BiliBatchDownloader 0.3.0 VERIFY</h1><p>解压整个文件夹。保留两个主程序、gallery-worker和_internal。自有源码MIT，第三方许可及源码见licenses和随包材料。</p>
+<h1>BiliBatchDownloader 0.3.0 VERIFY</h1><p><strong>当前状态：工程使用说明草稿。真实联网闭环未验收，新启动入口和Release尚未交付；请继续使用已验收的0.2.0。以下联网步骤在后续候选验收通过后启用。</strong></p><p>解压整个文件夹。保留两个主程序、gallery-worker和_internal。自有源码MIT，第三方许可及源码见licenses和随包材料。</p>
 <h2>启动</h2><p>本机已有作品使用“启动Bili联网图库候选版.cmd”，明确指定独立候选库。公开包为空库，使用“启用图库联网.cmd”开启图库功能；双击EXE默认离线。不会启动自动抓取或自动恢复上次联网任务。旧0.2与r8独立保留。</p>
 <h2>单条动态与手动选组</h2><ol><li>设置中填写已登录的专用Chrome档案目录、新下载目录和FFmpeg完整路径；同目录需有FFprobe。关闭专用浏览器后使用。</li><li>点击“添加图文”，粘贴单条opus或t.bilibili.com链接。读取真实正文、标签/话题和照片预览。</li><li>默认不勾选任何组。点击照片放大，手动勾选需要的内容；本版不自动识别人脸或角色。</li><li>点击“下载所选组”，若下载中心暂停，请手动继续派发。实况照片及MP4作为一组保存；未选组不正式归档，未选实况MP4不会请求。</li><li>照片使用有效预览缓存；缓存或清单变化时立即停止，不偷偷追加请求。已保存2/4组表示仅2组已保存，不表示整篇完整。</li></ol>
 <h2>浏览、正文与本地打开</h2><p>作者→图文／图片→作品→有序组。正文按纯文本保留段落；标签只来自原站字段及话题。有内容就显示，确认无内容留空，待获取/失败保留提示。搜索覆盖作者、标题、正文、标签与话题。</p><p>实况默认显示照片，点击播放一次，支持暂停、继续、重播、切回照片；切组或离开停止并释放源。打开原图、默认播放器、文件夹会先核对文件。无音轨实况不属于错误。</p>

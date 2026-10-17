@@ -1,0 +1,14 @@
+{
+  "status": "STOPPED_BEFORE_WORKER",
+  "reason": "parent_environment_key_case",
+  "exception_type": "KeyError",
+  "worker_started": false,
+  "network_requests": 0,
+  "media_requests": 0,
+  "total_requests": 0,
+  "remaining_stages": "NOT_EXECUTED",
+  "registration_sha256": "7e9c36b8a036ffd1748bf62a586d0f7dc6870f99d61171147a3a844422b3232d",
+  "evidence": "Parent stopped at environment dictionary lookup before the worker subprocess statement.",
+  "online_gate": "NOT_VERIFIED",
+  "utc": "2026-10-17T07:45:05.918649+00:00"
+}
