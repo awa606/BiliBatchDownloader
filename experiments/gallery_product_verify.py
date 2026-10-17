@@ -21,6 +21,14 @@ SAMPLE_ROWS=[('images','1249456774436618276',[1,3],6,2,'8afb9ed55ff35e3ed17eb947
  ('livephoto','1257912749013336118',[1,5,9],11,5,'a98aaf48db64d4c85bc5baeaf7ccc59a0c609d699d60b34cdcc345ded8dd3b5b')]
 
 
+def worker_environment(original):
+    env=dict(original)
+    windows=Path(env.get('SystemRoot') or env.get('SYSTEMROOT') or 'C:/Windows')
+    env['PATH']=os.pathsep.join([str(windows/'System32'),str(windows)])
+    for key in ('PYTHONPATH','PYTHONHOME','QT_PLUGIN_PATH','QML2_IMPORT_PATH'):env.pop(key,None)
+    return env
+
+
 def fingerprints(bundle,ffmpeg):
     files=[p for folder in ('src','scripts','resources') for p in (ROOT/folder).rglob('*')
            if p.suffix in ('.py','.qml') and '__pycache__' not in p.parts]+[Path(__file__)]
@@ -59,8 +67,7 @@ def main():
     lib=Library(out/'private-library');lib.initialize()
     for key in ('profile','ffmpeg'):lib.set_setting(key,source.setting(key))
     for key,value in dict(root=str(out/'media'),offline='0',gallery_online='1',paused='1').items():lib.set_setting(key,value)
-    env=os.environ.copy();env['PATH']=os.pathsep.join([env['SystemRoot']+'\\System32',env['SystemRoot']])
-    for key in ('PYTHONPATH','PYTHONHOME','QT_PLUGIN_PATH','QML2_IMPORT_PATH'):env.pop(key,None)
+    env=worker_environment(os.environ)
     report={'status':'IN_PROGRESS','registration_sha256':digest(out/'registration.json'),'stages':[],'total_requests':0}
     try:
         for name,ident,selected,prepare_limit,download_limit,_ in SAMPLE_ROWS:
@@ -70,6 +77,7 @@ def main():
                 payload={'url':'https://www.bilibili.com/opus/'+ident} if phase=='prepare' else prior|{'selected':selected}
                 spec=dict(data_dir=str(lib.directory),action='gallery_'+phase,payload=payload,baseline=baseline)
                 row=dict(sample=ident,phase=phase,status='FAIL',request_limit=limit);report['stages'].append(row)
+                time.sleep(1)  # Keep the request-start gap across separate workers too.
                 process=subprocess.Popen([str(bundle/'gallery-worker/BiliGalleryWorker.exe')],stdin=subprocess.PIPE,stdout=subprocess.PIPE,
                     stderr=subprocess.DEVNULL,env=env,creationflags=getattr(subprocess,'CREATE_NO_WINDOW',0))
                 job=Job();job.assign(process.pid)
