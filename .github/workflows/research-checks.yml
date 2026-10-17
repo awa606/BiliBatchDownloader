@@ -40,6 +40,17 @@ jobs:
         run: python -m pytest -q --basetemp=.artifacts/pytest-ci --junitxml=.artifacts/tests.xml
       - name: Check dependency consistency
         run: python -m pip check
+      - name: Freeze isolated gallery playback experiment
+        run: python experiments/build_qt_gallery_spike.py --output .artifacts/qt-gallery-freeze-ci
+      - name: Check frozen gallery using synthetic media only
+        env:
+          QT_QPA_PLATFORM: offscreen
+        shell: pwsh
+        run: |
+          $python = (Get-Command python).Source
+          $env:BILI_TEST_QT_SPIKE = Join-Path $env:GITHUB_WORKSPACE '.artifacts/qt-gallery-freeze-ci/dist/gallery-qt-spike/gallery-qt-spike.exe'
+          $env:PATH = "$env:SystemRoot\System32;$env:SystemRoot"
+          & $python -m pytest tests/test_qt_gallery_preview_spike.py -q --basetemp=.artifacts/pytest-qt-frozen --junitxml=.artifacts/qt-gallery-frozen.xml
       - name: Prepare redistribution notices for local CI build
         shell: pwsh
         run: |
@@ -58,4 +69,7 @@ jobs:
           path: |
             .artifacts/tests.xml
             .artifacts/frozen-ci/**/*.json
+            .artifacts/qt-gallery-frozen.xml
+            .artifacts/pytest-qt-frozen/**/report.json
+            .artifacts/qt-gallery-freeze-ci/build-receipt.json
           if-no-files-found: ignore
