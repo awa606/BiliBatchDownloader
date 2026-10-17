@@ -1,0 +1,41 @@
+{
+  "schema_version": 1,
+  "checked_utc": "2026-10-17T10:55:51.349664+00:00",
+  "status": "PASS",
+  "version": "1.32.16",
+  "release_page": "https://pypi.org/project/gallery-dl/1.32.16/",
+  "wheel": {
+    "filename": "gallery_dl-1.32.16-py3-none-any.whl",
+    "size": 942219,
+    "sha256": "2b7f548a9643bd78441a702efccea9165b81837c9be03494ba7f41051bcbb40f"
+  },
+  "sdist": {
+    "filename": "gallery_dl-1.32.16.tar.gz",
+    "size": 760621,
+    "sha256": "bacd7d63423ad45db98704fedafa1302343db6f250f9e9f69a9e142754ed9e37"
+  },
+  "installed_python_files": 347,
+  "all_wheel_python_sources_match": true,
+  "sdist_python_files": 347,
+  "all_sdist_python_sources_match": true,
+  "key_sources": [
+    {
+      "file": "gallery_dl/dt.py",
+      "sha256": "3540248718658417af42e9099c7b935cca4f5b93d4c697747bb920ceb8a5298a",
+      "matches": true
+    },
+    {
+      "file": "gallery_dl/extractor/bilibili.py",
+      "sha256": "bab6c5225d964b4ed46770fec0d825bd21572ad4eb6f174017e908f34e584fd5",
+      "matches": true
+    }
+  ],
+  "github_tag_observation": {
+    "url": "https://raw.githubusercontent.com/mikf/gallery-dl/v1.32.16/gallery_dl/extractor/bilibili.py",
+    "bytes": 6219,
+    "sha256": "8bca647861f108500a23b0c9d0dd70085695833310579c91c43b67c635c5607f",
+    "matches_installed": false,
+    "cause": "NOT_ESTABLISHED"
+  },
+  "bilibili_requests": 0
+}
